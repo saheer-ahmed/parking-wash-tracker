@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Parking Wash Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Black&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one column tool, role switcher on top; booking form, attendant queue and security log share one ticket model. */
+:root{
+  --bg:#F2EFE6; --surface:#FBFAF5; --ink:#10231C; --muted:#4A5A53; --line:#D6D0C0;
+  --accent:#F2C230; --accent-ink:#10231C; --brand:#10231C; --brand-ink:#F2EFE6;
+  --s-wait:#8A5A00; --s-wait-bg:#FBEBC4; --s-work:#0B5A8A; --s-work-bg:#D8EAF6;
+  --s-ready:#1E6B3A; --s-ready-bg:#D7EEDD; --s-done:#4A5A53; --s-done-bg:#E6E2D6;
+  --danger:#A3341F;
+  --f-display:'Archivo Black', 'Arial Black', Arial, sans-serif;
+  --f-body:'Archivo', Arial, sans-serif;
+  --f-mono:'JetBrains Mono', ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1A15; --surface:#16261F; --ink:#ECE8DC; --muted:#A9B7AF; --line:#2C4037;
+  --accent:#F2C230; --accent-ink:#10231C; --brand:#F2C230; --brand-ink:#10231C;
+  --s-wait:#F6D27A; --s-wait-bg:#3A2E10; --s-work:#8CC6EC; --s-work-bg:#13324A;
+  --s-ready:#8FD5A5; --s-ready-bg:#173B25; --s-done:#B7C2BC; --s-done-bg:#25332D;
+  --danger:#F09A86; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1A15; --surface:#16261F; --ink:#ECE8DC; --muted:#A9B7AF; --line:#2C4037;
+  --accent:#F2C230; --accent-ink:#10231C; --brand:#F2C230; --brand-ink:#10231C;
+  --s-wait:#F6D27A; --s-wait-bg:#3A2E10; --s-work:#8CC6EC; --s-work-bg:#13324A;
+  --s-ready:#8FD5A5; --s-ready-bg:#173B25; --s-done:#B7C2BC; --s-done-bg:#25332D;
+  --danger:#F09A86; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.45;padding-inline:16px;padding-block:20px 48px}
+.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--f-display);font-weight:400;font-size:clamp(26px,5vw,38px);line-height:1;margin:0;text-transform:uppercase;letter-spacing:.01em}
+.sub{color:var(--muted);margin:6px 0 0;font-size:15px}
+.live{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.on{background:var(--s-ready)}
+nav{display:flex;gap:6px;flex-wrap:wrap;border-bottom:2px solid var(--ink);padding-bottom:0}
+nav button{font:600 15px var(--f-body);background:none;color:var(--muted);border:0;border-bottom:4px solid transparent;padding:10px 14px 8px;cursor:pointer;min-height:44px}
+nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.panel{display:flex;flex-direction:column;gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+h2{font-size:20px;margin:0;font-weight:700;text-wrap:balance}
+h3{font-size:16px;margin:0;font-weight:700}
+.hint{color:var(--muted);font-size:14px;margin:0}
+form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+form .full{grid-column:1/-1}
+label{display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px}
+input,select{font:16px var(--f-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-bottom:2px solid var(--ink);padding:10px;min-height:44px;width:100%}
+.check{flex-direction:row;align-items:flex-start;gap:10px;font-weight:500;line-height:1.4}
+.check input{width:22px;height:22px;min-height:0;flex:none;margin-top:1px}
+.btn{font:700 15px var(--f-body);border:2px solid var(--ink);background:var(--ink);color:var(--bg);padding:10px 16px;min-height:44px;cursor:pointer}
+.btn.alt{background:transparent;color:var(--ink)}
+.btn.go{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.warn{background:transparent;color:var(--danger);border-color:var(--danger)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.mono{font-family:var(--f-mono);font-size:14px}
+.plate{font-family:var(--f-mono);font-weight:500;font-size:17px;letter-spacing:.04em;background:var(--bg);border:1.5px solid var(--ink);padding:2px 8px;display:inline-block}
+.chip{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 8px;display:inline-block}
+.st-booked{color:var(--s-wait);background:var(--s-wait-bg)}
+.st-verified,.st-washing{color:var(--s-work);background:var(--s-work-bg)}
+.st-ready{color:var(--s-ready);background:var(--s-ready-bg)}
+.st-closed,.st-cancelled{color:var(--s-done);background:var(--s-done-bg)}
+.ex{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border:1px dashed var(--muted);padding:2px 6px}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.steps li{border-top:4px solid var(--line);padding-top:6px;font-size:13px;color:var(--muted);min-width:0}
+.steps li.done{border-top-color:var(--ink);color:var(--ink);font-weight:600}
+.steps li.now{border-top-color:var(--accent);color:var(--ink);font-weight:700}
+.steps time{display:block;font-family:var(--f-mono);font-size:12px;font-weight:500;color:var(--muted)}
+.tk-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between}
+.tk-meta{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--muted);font-size:14px}
+.tk-meta b{color:var(--ink);font-weight:600}
+.photos{display:flex;gap:8px;flex-wrap:wrap}
+.photos figure{margin:0;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.photos img{width:120px;height:90px;object-fit:cover;border:1px solid var(--line)}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat{background:var(--surface);border:1px solid var(--line);padding:12px 14px}
+.stat b{display:block;font-family:var(--f-display);font-weight:400;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat span{font-size:13px;color:var(--muted);font-weight:600}
+.tablebox{overflow-x:auto;border:1px solid var(--line);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+td.t{font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.empty{border:2px dashed var(--line);padding:24px;text-align:center;color:var(--muted)}
+.notice{border-left:0;background:var(--s-wait-bg);color:var(--s-wait);padding:10px 12px;font-size:14px;font-weight:600}
+.verify{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.verify label{flex:1 1 180px}
+.err{color:var(--danger);font-size:14px;font-weight:600;margin:0}
+.alerts{margin:0;padding-left:18px;color:var(--muted);font-size:14px}
+@media (max-width:640px){form{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.steps li{font-size:11px}}
+@media (prefers-reduced-motion:no-preference){.card{transition:border-color .2s}}
+</style>
+<style>[hidden]{display:none!important}body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Parking Wash Tracker</h1>
+      <p class="sub">Booking, consent and job tracking for on-site car washing · Forum Mall pilot demo</p>
+    </div>
+    <div class="live" id="live"><span class="dot" id="liveDot"></span><span id="liveText">Connecting…</span></div>
+  </header>
+
+  <nav role="tablist" aria-label="View as">
+    <button role="tab" id="tab-customer" aria-controls="v-customer" aria-selected="true">Customer</button>
+    <button role="tab" id="tab-attendant" aria-controls="v-attendant" aria-selected="false">Attendant</button>
+    <button role="tab" id="tab-security" aria-controls="v-security" aria-selected="false">Mall security</button>
+  </nav>
+
+  <p class="notice" id="offline" hidden>Not connected to Firebase yet, so tickets stay on this screen only. Add your settings to firebase-config.js (see SETUP.md) to share them live.</p>
+
+  <!-- CUSTOMER -->
+  <section class="panel" id="v-customer" role="tabpanel" aria-labelledby="tab-customer">
+    <div class="card">
+      <h2>Book a wash for your parked car</h2>
+      <p class="hint">Scan the QR code at the parking entrance to open this page. Nothing is done to your car until you book and agree below.</p>
+      <form id="bookForm" novalidate>
+        <label>Car number
+          <input id="f-plate" name="plate" autocomplete="off" placeholder="KA 19 MN 4821" required>
+        </label>
+        <label>Parking bay
+          <input id="f-bay" name="bay" autocomplete="off" placeholder="B2 – 47" required>
+        </label>
+        <label>Service
+          <select id="f-service" name="service">
+            <option>Exterior eco wash</option>
+            <option>Interior cleaning</option>
+            <option>Full wash, inside and out</option>
+            <option>Steam interior cleaning</option>
+            <option>Tyre pressure check</option>
+            <option>Battery check</option>
+          </select>
+        </label>
+        <label>WhatsApp number for alerts
+          <input id="f-phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="98450 12345" required>
+        </label>
+        <label class="check full"><input type="checkbox" id="f-consent" required>
+          <span>I am the owner or driver of this car and I authorise the attendant to clean it in this bay. Exterior washes need no keys.</span>
+        </label>
+        <p class="err full" id="bookErr" hidden></p>
+        <div class="full row"><button class="btn go" type="submit" id="bookBtn">Book wash</button></div>
+      </form>
+    </div>
+    <div class="panel" id="myTickets"></div>
+  </section>
+
+  <!-- ATTENDANT -->
+  <section class="panel" id="v-attendant" role="tabpanel" aria-labelledby="tab-attendant" hidden>
+    <div class="card">
+      <div class="verify">
+        <label>Attendant on duty
+          <input id="f-att" autocomplete="off" placeholder="Your name">
+        </label>
+      </div>
+      <p class="hint">Work only on booked tickets. Re-type the car number from the plate before starting; it must match the booking.</p>
+    </div>
+    <div class="panel" id="queue"></div>
+  </section>
+
+  <!-- SECURITY -->
+  <section class="panel" id="v-security" role="tabpanel" aria-labelledby="tab-security" hidden>
+    <div class="stats" id="stats"></div>
+    <div class="row" style="justify-content:space-between">
+      <h2>Today's job log</h2>
+      <div class="row"><button class="btn alt" id="exBtn">Add example tickets</button><button class="btn alt" id="dlBtn">Download today's log (CSV)</button></div>
+    </div>
+    <div class="tablebox"><table>
+      <thead><tr><th>Ticket</th><th>Car</th><th>Bay</th><th>Service</th><th>Status</th><th>Attendant</th><th>Booked</th><th>Verified</th><th>Started</th><th>Done</th><th>Paid</th></tr></thead>
+      <tbody id="logBody"></tbody>
+    </table></div>
+    <p class="hint">Phone numbers are masked for security staff. Example tickets are marked and are for demonstrations only.</p>
+  </section>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
