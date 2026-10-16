@@ -138,6 +138,18 @@ table.small{min-width:0;font-size:14px}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .comments{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:8px;font-size:14px}
 @media (max-width:640px){.dstats{grid-template-columns:repeat(2,minmax(0,1fr))}.grid2{grid-template-columns:1fr}}
+.svcs{border:1px solid var(--line);padding:12px 14px;margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.svcs legend{font-weight:600;font-size:14px;padding:0 4px}
+.svchead{margin:4px 0 0;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.svcgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.svc{flex-direction:row;align-items:center;gap:10px;font-weight:500;border:1px solid var(--line);padding:10px;min-height:48px;cursor:pointer;background:var(--bg)}
+.svc:has(input:checked){border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.svc input{width:20px;height:20px;min-height:0;flex:none;margin:0}
+.svc span{flex:1;min-width:0}
+.svc b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.total{margin:4px 0 0;display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid var(--ink);padding-top:8px;font-weight:600}
+.total b{font-family:var(--f-display);font-weight:400;font-size:24px}
+@media (max-width:640px){.svcgrid{grid-template-columns:1fr}}
 .waitpay{margin:0;font-weight:600;color:var(--s-ready);background:var(--s-ready-bg);padding:10px 12px;font-size:14px}
 .pay{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:12px}
 .btn.wa{border-color:#1E6B3A;color:var(--s-ready)}
@@ -182,16 +194,22 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
         <label>Parking bay
           <input id="f-bay" name="bay" autocomplete="off" placeholder="B2 – 47" required>
         </label>
-        <label>Service
-          <select id="f-service" name="service">
-            <option>Exterior eco wash</option>
-            <option>Interior cleaning</option>
-            <option>Full wash, inside and out</option>
-            <option>Steam interior cleaning</option>
-            <option>Tyre pressure check</option>
-            <option>Battery check</option>
-          </select>
-        </label>
+        <fieldset class="full svcs" id="f-services">
+          <legend>Choose your services</legend>
+          <p class="svchead">Wash</p>
+          <div class="svcgrid">
+            <label class="svc"><input type="checkbox" value="Exterior eco wash" checked><span>Exterior eco wash</span><b data-price></b></label>
+            <label class="svc"><input type="checkbox" value="Interior cleaning"><span>Interior cleaning</span><b data-price></b></label>
+            <label class="svc"><input type="checkbox" value="Full wash, inside and out"><span>Full wash, inside and out</span><b data-price></b></label>
+            <label class="svc"><input type="checkbox" value="Steam interior cleaning"><span>Steam interior cleaning</span><b data-price></b></label>
+          </div>
+          <p class="svchead">Add-ons</p>
+          <div class="svcgrid">
+            <label class="svc"><input type="checkbox" value="Tyre pressure check"><span>Tyre pressure check</span><b data-price></b></label>
+            <label class="svc"><input type="checkbox" value="Battery check"><span>Battery check</span><b data-price></b></label>
+          </div>
+          <p class="total">Total <b id="f-total">₹0</b></p>
+        </fieldset>
         <label>WhatsApp number for alerts
           <input id="f-phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="98450 12345" required>
         </label>

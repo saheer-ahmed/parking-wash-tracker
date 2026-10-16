@@ -78,7 +78,16 @@ const waNumber = p => {
   if (d.length === 10) d = '91' + d;
   return d.length >= 11 ? d : '';
 };
-const price = tk => Number(business.prices?.[tk.service] || 0);
+// A ticket's service can hold several items joined with " + ".
+const SEP = ' + ';
+const items = svc => String(svc || '').split(SEP).map(x => x.trim()).filter(Boolean);
+const itemPrice = name => Number(business.prices?.[name] || 0);
+const price = tk => items(tk.service).reduce((sum, n) => sum + itemPrice(n), 0);
+const chosen = () => [...document.querySelectorAll('#f-services input:checked')].map(i => i.value);
+function updateTotal() {
+  const sum = chosen().reduce((s, n) => s + itemPrice(n), 0);
+  $('#f-total').textContent = '₹' + sum.toLocaleString('en-IN');
+}
 function waMessage(tk) {
   const c = code(tk);
   const amt = price(tk) ? ` ₹${price(tk)}` : '';
@@ -146,11 +155,12 @@ $('#bookForm').addEventListener('submit', async e => {
   if (norm(plate).length < 6) problems.push('Enter the full car number, for example KA 19 MN 4821.');
   if (!bay) problems.push('Enter the parking bay so the attendant can find the car.');
   if (phone.replace(/\D/g, '').length < 10) problems.push('Enter a 10-digit WhatsApp number for alerts.');
+  if (!chosen().length) problems.push('Choose at least one service.');
   if (!$('#f-consent').checked) problems.push('Tick the authorisation box to book.');
   if (problems.length) { err.textContent = problems.join(' '); err.hidden = false; return; }
   const ref = doc(collection(fs, 'tickets'));   // random 20-character id: only this phone knows it
   const c = newCode(); const at = now();
-  const tk = { code: c, plate: prettyPlate(plate), plateKey: norm(plate), bay, phone, service: $('#f-service').value,
+  const tk = { code: c, plate: prettyPlate(plate), plateKey: norm(plate), bay, phone, service: chosen().join(SEP),
     status: 'booked', consent: true, bookedAt: at, alerts: [{ at, text: 'Booking confirmed with ticket ' + c }] };
   $('#bookBtn').disabled = true;
   try {
@@ -551,9 +561,9 @@ function renderDash() {
 
   // Services
   const bySvc = new Map();
-  closed.forEach(x => { bySvc.set(x.service, (bySvc.get(x.service) || 0) + 1); });
+  closed.forEach(x => items(x.service).forEach(n => bySvc.set(n, (bySvc.get(n) || 0) + 1)));
   $('#svcBody').innerHTML = bySvc.size ? [...bySvc].sort((a, b) => b[1] - a[1]).map(([sv, c]) =>
-    `<tr><td>${esc(sv)}</td><td class="num">${c}</td><td class="num">${priced ? inr(c * Number(business.prices?.[sv] || 0)) : '–'}</td></tr>`).join('')
+    `<tr><td>${esc(sv)}</td><td class="num">${c}</td><td class="num">${priced ? inr(c * itemPrice(sv)) : '–'}</td></tr>`).join('')
     : '<tr><td colspan="3" class="hint">No completed washes yet.</td></tr>';
 
   // Comments
@@ -634,13 +644,14 @@ $('#exBtn').addEventListener('click', async () => {
 });
 
 // ---- start
-// Show each service with its price; the stored value stays the plain service name.
-document.querySelectorAll('#f-service option').forEach(opt => {
-  const name = opt.value || opt.textContent.trim();
-  opt.value = name;
-  const pr = Number(business.prices?.[name] || 0);
-  opt.textContent = pr ? `${name} · ₹${pr}` : name;
+// Show each service's price and keep the total up to date.
+document.querySelectorAll('#f-services .svc').forEach(l => {
+  const pr = itemPrice(l.querySelector('input').value);
+  l.querySelector('[data-price]').textContent = pr ? '₹' + pr : '';
 });
+$('#f-services').addEventListener('change', updateTotal);
+$('#bookForm').addEventListener('reset', () => setTimeout(updateTotal, 0));
+updateTotal();
 setMode(false);
 const hashTab = location.hash.replace('#', '');
 show(TABS.includes(hashTab) ? hashTab : store.get('pwt-tab', 'customer'));
