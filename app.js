@@ -2,11 +2,11 @@
 // Customers book without an account and only ever see their own ticket.
 // Staff sign in; the owner gives each account a role (attendant or mall security) on the Staff tab.
 
-import { firebaseConfig } from './firebase-config.js?v=202610161105';
-import { business } from './settings.js?v=202610161105';
+import { firebaseConfig } from './firebase-config.js?v=202610161109';
+import { business } from './settings.js?v=202610161109';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
-  getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, limit, where,
+  getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, limit, where,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
@@ -144,6 +144,7 @@ function refreshWho() {
   $('#tab-staff').hidden = role() !== 'owner';
   $('#tab-dash').hidden = role() !== 'owner';
   $('#exBtn').hidden = role() !== 'owner';
+  $('#clearBox').hidden = role() !== 'owner';
 }
 
 // ---- customer booking (no account needed)
@@ -475,6 +476,19 @@ function renderSecurity() {
     <td class="t">${t(tk.bookedAt)}</td><td class="t">${t(tk.verifiedAt)}</td><td class="t">${t(tk.startedAt)}</td><td class="t">${t(tk.completedAt)}</td><td class="t">${t(tk.paidAt)}</td></tr>`;
   }).join('')
     : '<tr><td colspan="14"><div class="empty">No jobs logged today. Each booking appears here with every step timed.</div></td></tr>';
+  $('#logCards').innerHTML = todays.length ? todays.map(tk => {
+    const st = LABEL[tk.status] ? tk.status : 'booked';
+    const times = [['Booked', tk.bookedAt], ['Started', tk.startedAt], ['Done', tk.completedAt], ['Paid', tk.paidAt]]
+      .filter(([, v]) => v).map(([l, v]) => `${l} <b>${t(v)}</b>`).join(' · ');
+    return `<article class="logcard">
+      <div class="tk-head"><div class="row"><span class="plate">${esc(tk.plate)}</span><span class="chip st-${st}">${LABEL[st]}</span>${tk.example ? '<span class="ex">Example</span>' : ''}</div>
+        <button class="link mono" data-detail="${esc(tk.id)}">${esc(code(tk))}</button></div>
+      <div class="tk-meta"><span>Bay <b>${esc(tk.bay)}</b></span><span>${esc(tk.service)}</span>${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}</div>
+      <div class="tk-meta"><span>Photos <b>${tk.photos?.before ? (tk.photos?.after ? 'Before + after' : 'Before') : 'None yet'}</b></span>
+        <span>Damage <b class="${tk.damage?.found ? 'dmgflag' : ''}">${tk.damage ? (tk.damage.found ? 'Noted' : 'None') : '–'}</b></span>
+        ${tk.rating ? `<span class="stars" aria-label="${tk.rating} out of 5">${stars(tk.rating)}</span>` : ''}</div>
+      <p class="times">${times}</p></article>`;
+  }).join('') : '<div class="empty">No jobs logged today. Each booking appears here with every step timed.</div>';
   const d = detailId && tickets.find(x => x.id === detailId);
   $('#detail').innerHTML = d ? `<article class="card"><div class="row" style="justify-content:space-between"><h3>Ticket ${esc(code(d))}</h3><button class="link" data-detail="">Close</button></div>
     ${headHTML(d, true)}${stepsHTML(d)}${damageHTML(d, false)}${photosHTML(d) || '<p class="hint">No photos yet.</p>'}${ratingHTML(d)}${alertsHTML(d)}</article>` : '';
@@ -494,7 +508,7 @@ function renderStaff() {
   }).join('');
 }
 
-function renderStaffViews() { renderQueue(); renderSecurity(); renderStaff(); renderDash(); }
+function renderStaffViews() { renderQueue(); renderSecurity(); renderStaff(); renderDash(); if (role() === 'owner' && clearStep === 0) renderClear(); }
 
 // ---- owner dashboard
 const mins = (a, b) => (a && b) ? (new Date(b) - new Date(a)) / 60000 : null;
@@ -588,6 +602,13 @@ document.addEventListener('click', async e => {
     card.querySelectorAll('[data-rate]').forEach(s => s.setAttribute('aria-pressed', String(Number(s.dataset.rate) <= Number(star.dataset.rate))));
     return;
   }
+  const cl = e.target.closest('[data-clear]');
+  if (cl) {
+    if (cl.dataset.clear === 'ask') { clearStep = 1; renderClear(); }
+    else if (cl.dataset.clear === 'no') { clearStep = 0; renderClear(); }
+    else clearTickets();
+    return;
+  }
   const rg = e.target.closest('[data-range]');
   if (rg) { dashRange = Number(rg.dataset.range); renderDash(); return; }
   const b = e.target.closest('[data-act]'); if (!b) return;
@@ -622,6 +643,27 @@ $('#dlBtn').addEventListener('click', () => {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
+
+// ---- clear test tickets (owner only, with an in-page confirmation)
+let clearStep = 0;
+function renderClear(msg) {
+  const n = tickets.length;
+  $('#clearBox').innerHTML = clearStep === 0
+    ? `<button class="btn warn sm" data-clear="ask" ${n ? '' : 'disabled'}>Clear test tickets</button>${msg ? `<span class="hint">${msg}</span>` : ''}`
+    : `<span class="clearq">Delete all ${n} ticket${n === 1 ? '' : 's'} from the last 31 days, with their photos? This can’t be undone.</span>
+       <button class="btn warn sm" data-clear="yes">Yes, delete ${n}</button><button class="btn alt sm" data-clear="no">Cancel</button>`;
+}
+async function clearTickets() {
+  const ids = tickets.map(x => x.id);
+  $('#clearBox').innerHTML = `<span class="hint">Deleting ${ids.length} tickets…</span>`;
+  let failed = 0;
+  for (const id of ids) {
+    try { await deleteDoc(doc(fs, 'tickets', id)); } catch { failed++; continue; }
+    try { await deleteDoc(doc(fs, 'ticketPhotos', id)); } catch {}
+  }
+  clearStep = 0;
+  renderClear(failed ? `${failed} ticket${failed === 1 ? '' : 's'} couldn’t be deleted. Try again.` : 'Test tickets cleared.');
+}
 
 // ---- example tickets for demos (owner only, marked "Example")
 $('#exBtn').addEventListener('click', async () => {

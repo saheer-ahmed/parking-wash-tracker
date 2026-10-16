@@ -151,6 +151,13 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .total{margin:4px 0 0;display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid var(--ink);padding-top:8px;font-weight:600}
 .total b{font-family:var(--f-display);font-weight:400;font-size:24px}
 @media (max-width:640px){.svcgrid{grid-template-columns:1fr}}
+.logcards{display:none;flex-direction:column;gap:10px}
+.logcard{background:var(--surface);border:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:8px}
+.times{margin:0;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.times b{color:var(--ink);font-weight:600}
+.clearbox{border-top:1px solid var(--line);padding-top:12px}
+.clearq{font-weight:600;color:var(--danger);flex:1 1 100%}
+@media (max-width:760px){.logcards{display:flex}.logtable{display:none}}
 .waitpay{margin:0;font-weight:600;color:var(--s-ready);background:var(--s-ready-bg);padding:10px 12px;font-size:14px}
 .pay{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:12px}
 .btn.wa{border-color:#1E6B3A;color:var(--s-ready)}
@@ -273,11 +280,13 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
       <h2>Today's job log</h2>
       <div class="row"><button class="btn alt" id="exBtn" hidden>Add example tickets</button><button class="btn alt" id="dlBtn">Download today's log (CSV)</button></div>
     </div>
-    <div class="tablebox"><table>
+    <div class="logcards" id="logCards"></div>
+    <div class="tablebox logtable"><table>
       <thead><tr><th>Ticket</th><th>Car</th><th>Bay</th><th>Service</th><th>Status</th><th>Attendant</th><th>Photos</th><th>Damage</th><th>Rating</th><th>Booked</th><th>Verified</th><th>Started</th><th>Done</th><th>Paid</th></tr></thead>
       <tbody id="logBody"></tbody>
     </table></div>
-    <p class="hint">Tap a ticket number to see its photos and alert history. Phone numbers are masked.</p>
+    <p class="hint">Tap a ticket number to see its photos and history. Phone numbers are masked.</p>
+    <div class="row clearbox" id="clearBox" hidden></div>
     <div class="panel" id="detail"></div>
   </section>
 
@@ -316,6 +325,6 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <p class="hint">Example tickets are left out. Revenue uses the prices in settings.js.</p>
   </section>
 </div>
-<script type="module" src="app.js?v=202610161105"></script>
+<script type="module" src="app.js?v=202610161109"></script>
 </body>
 </html>
