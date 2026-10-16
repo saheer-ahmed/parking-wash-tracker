@@ -2,8 +2,8 @@
 // Customers book without an account and only ever see their own ticket.
 // Staff sign in; the owner gives each account a role (attendant or mall security) on the Staff tab.
 
-import { firebaseConfig } from './firebase-config.js';
-import { business } from './settings.js';
+import { firebaseConfig } from './firebase-config.js?v=202610161105';
+import { business } from './settings.js?v=202610161105';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, limit, where,

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Parking Wash Tracker</title>
@@ -260,7 +261,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   <!-- ATTENDANT -->
   <section class="panel" id="v-attendant" role="tabpanel" aria-labelledby="tab-attendant" hidden>
     <div class="card">
-      <p class="hint"><b>Rules:</b> work only on booked tickets. Re-type the number plate to verify the car. A before-photo is required to start, and an after-photo to finish.</p>
+      <p class="hint"><b>Rules:</b> work only on booked tickets. Re-type the number plate to verify the car, then check for existing damage. The damage check and a before-photo are required to start, and an after-photo to finish.</p>
     </div>
     <div class="panel" id="queue"></div>
   </section>
@@ -315,6 +316,6 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <p class="hint">Example tickets are left out. Revenue uses the prices in settings.js.</p>
   </section>
 </div>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=202610161105"></script>
 </body>
 </html>
