@@ -525,7 +525,7 @@ function renderDash() {
   const bw = (W - L - R) / hours.length;
   const y = v => T + (H - T - B) * (1 - v / top);
   let svg = '';
-  for (let v = 0; v <= top; v += step) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" class="ax">${v}</text>`;
+  for (let v = 0; v <= top; v += step) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${L - 8}" y="${y(v) + 7}" text-anchor="end" class="ax">${v}</text>`;
   hours.forEach((h, i) => {
     const c = counts[h], x = L + i * bw + 2, w = Math.max(2, bw - 4);
     const label = `${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00 · ${c} booking${c === 1 ? '' : 's'}`;
