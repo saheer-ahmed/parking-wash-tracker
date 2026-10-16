@@ -3,6 +3,7 @@
 // Staff sign in; the owner gives each account a role (attendant or mall security) on the Staff tab.
 
 import { firebaseConfig } from './firebase-config.js';
+import { business } from './settings.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, limit,
@@ -65,6 +66,36 @@ const code = tk => tk.code || tk.id;
 const role = () => profile?.role || (user ? 'pending' : null);
 const can = view => !!user && (ALLOW[view] || []).includes(role());
 const addAlert = (tk, text) => [...(tk.alerts || []), { at: now(), text }].slice(-12);
+// ---- WhatsApp and UPI links
+const waNumber = p => {
+  let d = String(p || '').replace(/\D/g, '');
+  if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  if (d.length === 10) d = '91' + d;
+  return d.length >= 11 ? d : '';
+};
+const price = tk => Number(business.prices?.[tk.service] || 0);
+function waMessage(tk) {
+  const c = code(tk);
+  const amt = price(tk) ? ` ₹${price(tk)}` : '';
+  const upi = business.upiId ? ` to UPI ID ${business.upiId}` : '';
+  return ({
+    booked: `Hi, your car ${tk.plate} is booked for ${tk.service} at bay ${tk.bay}. Ticket ${c}. We'll message you when the wash starts.`,
+    verified: `Hi, we've found your car ${tk.plate} at bay ${tk.bay} and will start the ${tk.service} shortly. Ticket ${c}.`,
+    washing: `Your car ${tk.plate} is being washed now. Ticket ${c}. We'll message you when it's ready.`,
+    ready: `Your car ${tk.plate} is ready at bay ${tk.bay}. Please pay${amt} by UPI${upi}. Ticket ${c}. Thank you!`,
+  })[tk.status] || '';
+}
+function waLink(tk) {
+  const n = waNumber(tk.phone); const m = waMessage(tk);
+  return n && m ? `https://wa.me/${n}?text=${encodeURIComponent(m)}` : '';
+}
+function upiLink(tk) {
+  if (!business.upiId) return '';
+  const q = { pa: business.upiId, pn: business.payeeName || 'Parking Wash', tn: `Car wash ${code(tk)}`, cu: 'INR' };
+  if (price(tk)) q.am = String(price(tk));
+  return 'upi://pay?' + Object.entries(q).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+}
+
 const findTicket = id => tickets.find(x => x.id === id) || (myTickets.has(id) ? { id, ...myTickets.get(id) } : null);
 
 // ---- tabs and access
@@ -310,7 +341,14 @@ function renderCustomer() {
   box.innerHTML = list.map(tk => `<article class="card" data-id="${esc(tk.id)}">
     <h3>Your ticket</h3>${headHTML(tk, false)}${stepsHTML(tk)}${photosHTML(tk)}${alertsHTML(tk)}
     ${tk.status === 'booked' ? '<div class="row"><button class="btn warn" data-act="cancel">Cancel booking</button></div>' : ''}
+    ${tk.status === 'ready' ? payHTML(tk) : ''}
     <p class="err" hidden></p></article>`).join('');
+}
+function payHTML(tk) {
+  const link = upiLink(tk); const amt = price(tk) ? ` ₹${price(tk)}` : '';
+  return link
+    ? `<div class="row"><a class="btn go" href="${esc(link)}">Pay${amt} by UPI</a><span class="hint">Opens Google Pay, PhonePe, Paytm or your bank app.</span></div>`
+    : '<p class="hint">Your car is ready. Please pay the attendant by UPI.</p>';
 }
 
 function photoBtn(kind, has) {
@@ -327,7 +365,9 @@ function renderQueue() {
     if (tk.status === 'verified') actions = `<div class="row">${photoBtn('before', !!p.before)}<button class="btn ${p.before ? 'go' : 'alt'}" data-act="start" ${p.before ? '' : 'disabled'}>Start wash</button></div>${p.before ? '' : '<p class="hint">Take the before-photo to unlock Start wash.</p>'}`;
     if (tk.status === 'washing') actions = `<div class="row">${photoBtn('after', !!p.after)}<button class="btn ${p.after ? 'go' : 'alt'}" data-act="done" ${p.after ? '' : 'disabled'}>Wash complete</button></div>${p.after ? '' : '<p class="hint">Take the after-photo to unlock Wash complete.</p>'}`;
     if (tk.status === 'ready') actions = `<div class="row"><button class="btn go" data-act="paid">UPI payment received</button></div>`;
-    return `<article class="card" data-id="${esc(tk.id)}">${headHTML(tk, true)}${stepsHTML(tk)}${photosHTML(tk)}${actions}<p class="err" hidden></p></article>`;
+    const wa = waLink(tk);
+    const waBtn = wa ? `<a class="btn alt wa" href="${esc(wa)}" target="_blank" rel="noopener">Send WhatsApp update</a>` : '';
+    return `<article class="card" data-id="${esc(tk.id)}">${headHTML(tk, true)}${stepsHTML(tk)}${photosHTML(tk)}${actions}${waBtn ? `<div class="row">${waBtn}</div>` : ''}<p class="err" hidden></p></article>`;
   }).join('');
 }
 
