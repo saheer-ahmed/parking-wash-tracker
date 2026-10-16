@@ -2,8 +2,8 @@
 // Customers book without an account and only ever see their own ticket.
 // Staff sign in; the owner gives each account a role (attendant or mall security) on the Staff tab.
 
-import { firebaseConfig } from './firebase-config.js?v=202610161132';
-import { business } from './settings.js?v=202610161132';
+import { firebaseConfig } from './firebase-config.js?v=202610161337';
+import { business } from './settings.js?v=202610161337';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, getDocs, onSnapshot, query, orderBy, limit, where,
@@ -328,6 +328,12 @@ async function act(id, action, extra) {
     Object.assign(patch, { status: 'closed', paidAt: now(), paidVia: 'Customer (demo)', alerts: addAlert(tk, 'Payment received. Ticket closed. Thank you!') });
   } else {
     if (!can('attendant')) return 'Only attendants can update jobs.';
+    if (action === 'takeover') {
+      if (!tk.attendantUid || tk.attendantUid === user.uid) return '';
+      Object.assign(patch, { attendant: by, attendantUid: user.uid, alerts: addAlert(tk, `Job handed over from ${tk.attendant || 'another attendant'} to ${by}`) });
+    } else if (tk.status !== 'booked' && tk.attendantUid && tk.attendantUid !== user.uid) {
+      return `${tk.attendant || 'Another attendant'} is on this job. Tap “Take over this job” first.`;
+    }
     if (action === 'verify') {
       if (norm(extra) !== tk.plateKey) return 'Car number doesn’t match the booking. Don’t start; check the bay with the customer.';
       Object.assign(patch, { status: 'verified', verifiedAt: now(), attendant: by, attendantUid: user.uid, alerts: addAlert(tk, `Car verified by ${by}`) });
@@ -384,13 +390,14 @@ function shrink(file, max = 480) {
 async function addPhoto(id, kind, file) {
   if (!file) return '';
   try {
-    const data = await shrink(file);
     const tk = findTicket(id);
+    if (tk?.attendantUid && tk.attendantUid !== user?.uid) return `${tk.attendant || 'Another attendant'} is on this job. Tap “Take over this job” first.`;
+    const data = await shrink(file);
     await setDoc(doc(fs, 'ticketPhotos', id), { [kind]: data }, { merge: true });
     photoData.set(id, { ...(photoData.get(id) || {}), [kind]: data });
-    await updateDoc(doc(fs, 'tickets', id), { photos: { ...(tk.photos || {}), [kind]: true, [kind + 'At']: now() } });
+    await updateDoc(doc(fs, 'tickets', id), { photos: { ...(tk.photos || {}), [kind]: true, [kind + 'At']: now(), [kind + 'By']: profile?.name || 'Staff' } });
     return '';
-  } catch { return 'Photo didn’t save. Try again or take a new photo.'; }
+  } catch (err) { console.error(err); return 'Photo didn’t save. Check the internet connection and take it again.'; }
 }
 function ensurePhotos(id) {
   if (photoSubs.has(id) || photoSubs.size > 60) return;
@@ -425,7 +432,7 @@ function photosHTML(tk) {
   const fig = (kind, label) => {
     if (!p[kind]) return;
     const src = getPhoto(tk, kind);
-    out.push(src ? `<figure><img src="${src}" alt="${label}, ${esc(tk.plate)}">${label} · ${t(p[kind + 'At'])}</figure>`
+    out.push(src ? `<figure><img src="${src}" alt="${label}, ${esc(tk.plate)}">${label} · ${t(p[kind + 'At'])}${p[kind + 'By'] ? ` · ${esc(p[kind + 'By'])}` : ''}</figure>`
                  : `<figure><span class="ph">Loading…</span>${label} · ${t(p[kind + 'At'])}</figure>`);
   };
   fig('before', 'Before'); fig('after', 'After');
@@ -516,7 +523,7 @@ function payHTML(tk) {
 }
 
 function photoBtn(kind, has) {
-  return `<label class="btn ${has ? 'alt' : 'go'}">${has ? 'Retake' : 'Take'} ${kind}-photo<input type="file" accept="image/*" capture="environment" data-photo="${kind}" hidden></label>`;
+  return `<button class="btn ${has ? 'alt' : 'go'}" data-photo="${kind}">${has ? 'Retake' : 'Take'} ${kind}-photo</button>`;
 }
 function noshowHTML() {
   return `<details class="noshow"><summary class="link">Car not found or customer left?</summary>
@@ -564,12 +571,15 @@ function renderQueue() {
         : `<div class="dmgcheck"><h3>1. Existing damage check</h3><p class="hint">Walk around the car before touching it. Record any scratch, dent or crack that is already there.</p>
            <div class="row"><button class="btn alt" data-act="nodamage">No existing damage</button></div>
            <label>Or describe the damage<input class="dmgnote" maxlength="200" placeholder="Scratch on rear bumper, left side"></label>
-           <div class="row"><label class="btn alt">${p.damage ? 'Retake' : 'Add'} damage photo<input type="file" accept="image/*" capture="environment" data-photo="damage" hidden></label><button class="btn alt" data-act="damage">Save damage note</button></div></div>`;
+           <div class="row"><button class="btn alt" data-photo="damage">${p.damage ? 'Retake' : 'Add'} damage photo</button><button class="btn alt" data-act="damage">Save damage note</button></div></div>`;
       const ready = !!(tk.damage && p.before);
       actions = `${dmg}<h3>2. Before-photo and start</h3><div class="row">${photoBtn('before', !!p.before)}<button class="btn ${ready ? 'go' : 'alt'}" data-act="start" ${ready ? '' : 'disabled'}>Start wash</button></div>${ready ? '' : `<p class="hint">${tk.damage ? '' : 'Do the damage check and '}${p.before ? '' : 'take the before-photo '}to unlock Start wash.</p>`}${noshowHTML()}`;
     }
     if (tk.status === 'washing') actions = `<div class="row">${photoBtn('after', !!p.after)}<button class="btn ${p.after ? 'go' : 'alt'}" data-act="done" ${p.after ? '' : 'disabled'}>Wash complete</button></div>${p.after ? '' : '<p class="hint">Take the after-photo to unlock Wash complete.</p>'}`;
     if (tk.status === 'ready') actions = `<p class="waitpay">Waiting for the customer to pay on their ticket. This job closes by itself once they tap Pay.</p><div class="row"><button class="link" data-act="paid">Customer paid in cash instead</button></div>`;
+    if (tk.status !== 'booked' && tk.attendantUid && tk.attendantUid !== user?.uid) {
+      actions = `<p class="waitpay"><b>${esc(tk.attendant || 'Another attendant')}</b> is on this job. Only they can update it.</p><div class="row"><button class="link" data-act="takeover">Take over this job</button></div>`;
+    }
     const wa = waLink(tk);
     const waBtn = wa ? `<a class="btn alt wa" href="${esc(wa)}" target="_blank" rel="noopener">Send WhatsApp update</a><span class="hint">Opens WhatsApp with the message ready. Tap send.</span>` : '';
     return `<article class="card" data-id="${esc(tk.id)}">${headHTML(tk, true)}${stepsHTML(tk)}${tk.status !== 'verified' ? damageHTML(tk, false) : ''}${photosHTML(tk)}${actions}${waBtn ? `<div class="row">${waBtn}</div>` : ''}<p class="err" hidden></p></article>`;
@@ -968,10 +978,33 @@ document.addEventListener('change', async e => {
   const ss = e.target.closest('[data-site-uid]');
   if (ss) { try { await updateDoc(doc(fs, 'roles', ss.dataset.siteUid), { site: ss.value, changedAt: now() }); } catch {} return; }
   if (e.target.id === 'dashSite') { dashSite = e.target.value; renderDash(); return; }
-  const inp = e.target.closest('[data-photo]'); if (!inp) return;
-  const card = inp.closest('[data-id]');
-  const msg = await addPhoto(card.dataset.id, inp.dataset.photo, inp.files[0]);
-  if (msg) { const el = card.querySelector('.err'); el.textContent = msg; el.hidden = false; }
+});
+
+// One camera input that lives outside the job cards. The cards redraw whenever anything changes,
+// and on some phones that used to throw away the photo while the camera app was open.
+const cam = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', hidden: true });
+cam.setAttribute('capture', 'environment');
+document.body.append(cam);
+let camFor = null;
+const note = Object.assign(document.createElement('div'), { className: 'toast', hidden: true });
+document.body.append(note);
+let noteTimer;
+function toast(text, bad, keep) {
+  note.textContent = text; note.classList.toggle('bad', !!bad); note.hidden = false;
+  clearTimeout(noteTimer); if (!keep) noteTimer = setTimeout(() => { note.hidden = true; }, bad ? 6000 : 2500);
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-photo]'); if (!b) return;
+  const card = b.closest('[data-id]'); if (!card) return;
+  camFor = { id: card.dataset.id, kind: b.dataset.photo };
+  cam.value = ''; cam.click();
+});
+cam.addEventListener('change', async () => {
+  const f = cam.files[0]; const job = camFor; camFor = null;
+  if (!f || !job) return;
+  toast('Saving photo…', false, true);
+  const msg = await addPhoto(job.id, job.kind, f);
+  toast(msg || 'Photo saved', !!msg);
 });
 
 // ---- download today's log

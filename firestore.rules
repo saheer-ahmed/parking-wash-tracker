@@ -48,6 +48,10 @@ service cloud.firestore {
       function staffHere() {
         return hasRole(['owner']) || (hasRole(['attendant']) && o().get('site', 'forum') == userSite());
       }
+      // Once a car is verified, only the attendant on the job can move it on (or someone who takes it over).
+      function mine() {
+        return o().status == 'booked' || o().get('attendantUid', '') == '' || o().attendantUid == request.auth.uid;
+      }
 
       // Reading one ticket by its private id is open; listing is staff only, and only for their own site.
       allow get: if true;
@@ -73,7 +77,11 @@ service cloud.firestore {
           (o().status == 'closed' && d().status == 'closed' && !('rating' in o())
             && changed().hasOnly(['rating', 'ratingComment', 'ratedAt']) && goodRating())
           ||
-          (staffHere() && locked() && (
+          (staffHere() && locked() && o().status in ['verified', 'washing', 'ready']
+            && d().status == o().status && d().attendantUid == request.auth.uid
+            && changed().hasOnly(['attendant', 'attendantUid', 'alerts']))
+          ||
+          (staffHere() && locked() && mine() && (
                step('booked', 'verified')
             || (step('verified', 'washing') && 'before' in d().photos && d().damage is map)
             || (step('washing', 'ready') && 'after' in d().photos)
@@ -89,7 +97,8 @@ service cloud.firestore {
       allow get: if true;
       allow list: if false;
       allow create, update: if hasRole(['attendant', 'owner'])
-                    && request.resource.data.keys().hasOnly(['before', 'after', 'damage']);
+                    && request.resource.data.keys().hasOnly(['before', 'after', 'damage'])
+                    && get(/databases/$(database)/documents/tickets/$(ticketId)).data.get('attendantUid', '') in ['', request.auth.uid];
       allow delete: if hasRole(['owner']);
     }
 
