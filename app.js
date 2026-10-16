@@ -280,7 +280,7 @@ async function act(id, action, extra) {
       if (!tk.photos?.after) return 'Take the after-photo first.';
       Object.assign(patch, { status: 'ready', completedAt: now(), alerts: addAlert(tk, 'Your car is ready. Pay by UPI link') });
     }
-    if (action === 'paid') Object.assign(patch, { status: 'closed', paidAt: now(), alerts: addAlert(tk, 'Payment received. Ticket closed') });
+    if (action === 'paid') Object.assign(patch, { status: 'closed', paidAt: now(), paidVia: 'Cash to attendant', alerts: addAlert(tk, `Cash payment received by ${by}. Ticket closed`) });
   }
   try { await updateDoc(doc(fs, 'tickets', id), patch); } catch { return 'Update didn’t save. Check your connection and try again.'; }
   return '';
@@ -366,7 +366,7 @@ function renderQueue() {
     if (tk.status === 'booked') actions = `<div class="verify"><label>Car number on the plate<input class="vplate" autocomplete="off" placeholder="Type what you see"></label><button class="btn go" data-act="verify">Verify car</button></div>`;
     if (tk.status === 'verified') actions = `<div class="row">${photoBtn('before', !!p.before)}<button class="btn ${p.before ? 'go' : 'alt'}" data-act="start" ${p.before ? '' : 'disabled'}>Start wash</button></div>${p.before ? '' : '<p class="hint">Take the before-photo to unlock Start wash.</p>'}`;
     if (tk.status === 'washing') actions = `<div class="row">${photoBtn('after', !!p.after)}<button class="btn ${p.after ? 'go' : 'alt'}" data-act="done" ${p.after ? '' : 'disabled'}>Wash complete</button></div>${p.after ? '' : '<p class="hint">Take the after-photo to unlock Wash complete.</p>'}`;
-    if (tk.status === 'ready') actions = `<div class="row"><button class="btn go" data-act="paid">UPI payment received</button></div>`;
+    if (tk.status === 'ready') actions = `<p class="waitpay">Waiting for the customer to pay on their ticket. This job closes by itself once they tap Pay.</p><div class="row"><button class="link" data-act="paid">Customer paid in cash instead</button></div>`;
     const wa = waLink(tk);
     const waBtn = wa ? `<a class="btn alt wa" href="${esc(wa)}" target="_blank" rel="noopener">Send WhatsApp update</a>` : '';
     return `<article class="card" data-id="${esc(tk.id)}">${headHTML(tk, true)}${stepsHTML(tk)}${photosHTML(tk)}${actions}${waBtn ? `<div class="row">${waBtn}</div>` : ''}<p class="err" hidden></p></article>`;
@@ -437,10 +437,10 @@ document.addEventListener('change', async e => {
 
 // ---- download today's log
 $('#dlBtn').addEventListener('click', () => {
-  const rows = [['Ticket', 'Car', 'Bay', 'Service', 'Status', 'Attendant', 'Before photo', 'After photo', 'Booked', 'Verified', 'Started', 'Completed', 'Paid', 'Consent']];
+  const rows = [['Ticket', 'Car', 'Bay', 'Service', 'Status', 'Attendant', 'Before photo', 'After photo', 'Booked', 'Verified', 'Started', 'Completed', 'Paid', 'Paid via', 'Consent']];
   tickets.filter(x => today(x.bookedAt)).forEach(tk => rows.push([code(tk), tk.plate, tk.bay, tk.service, LABEL[tk.status] || tk.status, tk.attendant || '',
     tk.photos?.before ? 'Yes' : 'No', tk.photos?.after ? 'Yes' : 'No',
-    tk.bookedAt || '', tk.verifiedAt || '', tk.startedAt || '', tk.completedAt || '', tk.paidAt || '', tk.consent ? 'Yes' : 'No']));
+    tk.bookedAt || '', tk.verifiedAt || '', tk.startedAt || '', tk.completedAt || '', tk.paidAt || '', tk.paidVia || '', tk.consent ? 'Yes' : 'No']));
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
