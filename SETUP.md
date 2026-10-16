@@ -88,7 +88,7 @@ After uploading, publish the new `firestore.rules` once (Firestore → Rules →
 
 **Zone QR codes:** Dashboard → **Parking QR codes** → **Print**. Each code opens the booking page with the site and zone already filled in.
 
-**Walk-up booking:** Attendant tab → **Walk-up customer**. Ask the customer's consent, fill the car number and services, and the ticket starts as a normal booking marked "Walk-up".
+**Walk-up booking:** Jobs tab → **+ Walk-up**. Ask the customer's consent, fill the car number and services, and the ticket starts as a normal booking marked "Walk-up".
 
 **Not done:** if a car isn't in the bay or the customer leaves, the attendant closes the ticket as **Not done** with a reason. It shows on the ticket, the log and the report.
 
@@ -101,6 +101,17 @@ After uploading, publish the new `firestore.rules` once (Firestore → Rules →
 **Revenue and monthly report:** the dashboard shows revenue per day. **Monthly report** builds a summary for the mall (washes, revenue, venue share, ratings, damage, not done) that can be printed or saved as PDF, downloaded as CSV or copied.
 
 **Install on the phone:** open the site in Chrome and tap **Install app** (or menu → Add to Home screen). It opens straight to the Attendant tab.
+
+## Version 5: new design
+
+No rules change. The app now looks and works like this:
+
+- **Customers** see only the booking page. Staff tap **Staff sign in** at the bottom. After signing in, staff land on their own screen (Jobs for attendants, Security log for security).
+- **Booking:** wash types are large tiles, and the total and **Book wash** stay at the bottom of the screen. After booking, the ticket shows a large status ("Waiting for an attendant", "Your car is being washed", "Your car is ready") with a big Pay button.
+- **Jobs (attendant):** a short list grouped into My jobs, New bookings and Other attendants. Tap a car to open it. Each job shows only the next step with one big button. **+ Walk-up** sits at the bottom right. New bookings play a sound and vibrate; the bell button next to the shift turns the sound off.
+- **Dashboard:** four headline numbers, then sections that open on tap (Team, Revenue, Bookings, Attendants, Comments, Monthly report, QR codes).
+- **Security log:** Add example tickets and Clear test tickets are under **Testing tools** (owner only).
+- Dark mode follows the phone's setting.
 
 ## Before real customers use it
 

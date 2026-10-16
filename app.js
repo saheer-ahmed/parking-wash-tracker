@@ -2,8 +2,8 @@
 // Customers book without an account and only ever see their own ticket.
 // Staff sign in; the owner gives each account a role (attendant or mall security) on the Staff tab.
 
-import { firebaseConfig } from './firebase-config.js?v=202610161337';
-import { business } from './settings.js?v=202610161337';
+import { firebaseConfig } from './firebase-config.js?v=202610161704';
+import { business } from './settings.js?v=202610161704';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, getDocs, onSnapshot, query, orderBy, limit, where,
@@ -42,6 +42,11 @@ let current = 'customer';
 let detailId = null;
 let dashRange = 7;
 let dashSite = 'all';
+let bookOpen = false;              // customer tapped "Book another car"
+let openJob;                        // attendant: the job card that is expanded (undefined = pick one)
+const dmgOpen = new Set();          // attendant: jobs where "Found damage" was tapped
+const lastSeen = { customer: new Map(), queue: new Map() };   // status last drawn, to flash changes
+let soundOn = true;
 let shifts = [];                  // owner: today's shifts; attendant: own shift
 const visits = new Map();         // ticket id -> earlier paid washes by the same car (for loyalty)
 const photoData = new Map();   // ticket id -> { before, after, damage } images
@@ -133,6 +138,7 @@ const findTicket = id => tickets.find(x => x.id === id) || (myTickets.has(id) ? 
 
 // ---- tabs and access
 const TABS = ['customer', 'attendant', 'security', 'staff', 'dash'];
+const homeTab = () => ({ security: 'security', attendant: 'attendant', owner: 'attendant' })[role()] || 'customer';
 function show(name) {
   current = name;
   TABS.forEach(n => $('#tab-' + n).setAttribute('aria-selected', String(n === name)));
@@ -148,9 +154,17 @@ function show(name) {
     if (user && role() === 'none') {
       $('#pendingCard').querySelector('p').textContent = 'Your access has been removed. Contact the owner if this is a mistake.';
     }
-    $('#noAccessText').textContent = `You’re signed in as ${ROLE_LABEL[role()] || role()}. Use the ${role() === 'security' ? 'Mall security' : 'Attendant'} tab.`;
+    $('#noAccessText').textContent = `You’re signed in as ${ROLE_LABEL[role()] || role()}. Use the ${role() === 'security' ? 'Security log' : 'Jobs'} tab.`;
   }
+  document.body.classList.toggle('wide', ['security', 'dash', 'staff'].includes(name));
+  $('#walkFab').hidden = !(name === 'attendant' && can('attendant'));
+  setBrandSite();
   store.set('pwt-tab', name);
+}
+function setBrandSite() {
+  const staffView = current !== 'customer' && user;
+  $('#brandSite').textContent = !staffView ? `${siteName(urlSite)}${urlZone ? ' · ' + urlZone : ''}`
+    : role() === 'owner' && SITES.length > 1 ? 'All sites' : siteName(mySite());
 }
 TABS.forEach(n => $('#tab-' + n).addEventListener('click', () => { if (location.hash) history.replaceState(null, '', location.pathname); show(n); }));
 
@@ -160,10 +174,15 @@ function refreshWho() {
     $('#whoName').textContent = profile?.name || user.email;
     $('#whoRole').textContent = ROLE_LABEL[role()] || role();
   }
-  $('#tab-staff').hidden = role() !== 'owner';
-  $('#tab-dash').hidden = role() !== 'owner';
-  $('#exBtn').hidden = role() !== 'owner';
-  $('#clearBox').hidden = role() !== 'owner';
+  const r = role();
+  $('#tabs').hidden = !['owner', 'attendant', 'security'].includes(r);
+  $('#tab-attendant').hidden = !['attendant', 'owner'].includes(r);
+  $('#tab-security').hidden = !['security', 'owner'].includes(r);
+  $('#tab-customer').hidden = r !== 'owner';
+  $('#tab-staff').hidden = r !== 'owner';
+  $('#tab-dash').hidden = r !== 'owner';
+  $('#toolsBox').hidden = r !== 'owner';
+  $('#staffFoot').hidden = !!user;
 }
 
 // ---- customer booking (no account needed)
@@ -189,6 +208,8 @@ $('#bookForm').addEventListener('submit', async e => {
     mine = [ref.id, ...mine.filter(x => x !== ref.id)].slice(0, 10); store.set('pwt-mine2', mine);
     watchMine();
     $('#bookForm').reset();
+    bookOpen = false;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch {
     err.textContent = 'Booking didn’t go through. Check your connection and book again.';
     err.hidden = false;
@@ -252,7 +273,9 @@ $('#resetBtn').addEventListener('click', async () => {
   try { await sendPasswordResetEmail(auth, email); ok.textContent = 'Reset link sent. Check your email.'; ok.hidden = false; }
   catch (x) { err.textContent = authMsg(x.code); err.hidden = false; }
 });
-$('#signOutBtn').addEventListener('click', () => signOut(auth));
+$('#signOutBtn').addEventListener('click', () => { current = 'customer'; signOut(auth); });
+$('#staffLink').addEventListener('click', () => { show('attendant'); window.scrollTo({ top: 0 }); });
+$('#backBook').addEventListener('click', () => show('customer'));
 
 onAuthStateChanged(auth, u => {
   user = u; profile = null;
@@ -269,7 +292,10 @@ onAuthStateChanged(auth, u => {
     const prev = `${profile?.role}|${profile?.site}`;
     profile = snap.data();
     refreshWho();
-    if (prev !== `${profile.role}|${profile.site}`) startStaffFeeds();
+    if (prev !== `${profile.role}|${profile.site}`) {
+      startStaffFeeds();
+      if (current === 'customer' || !can(current)) current = homeTab();
+    }
     show(current);
   }, () => { refreshWho(); show(current); });
   refreshWho(); show(current);
@@ -279,8 +305,10 @@ function startStaffFeeds() {
   ['tickets', 'staff', 'shifts'].forEach(k => { if (unsubs[k]) { unsubs[k](); unsubs[k] = null; } });
   tickets = []; staff = []; shifts = [];
   const r = role();
+  seenBooked.clear(); seededBooked = false;
   const onTickets = snap => {
     tickets = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.bookedAt || '').localeCompare(a.bookedAt || ''));
+    checkNewBookings();
     $('#offline').hidden = true;
     renderStaffViews();
   };
@@ -308,6 +336,34 @@ function startStaffFeeds() {
     }
   }
   renderStaffViews();
+}
+
+// ---- new booking alert for attendants: sound, vibration and a banner
+const seenBooked = new Set(); let seededBooked = false;
+let actx = null;
+function chime() {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const t0 = actx.currentTime;
+    [880, 1175].forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain(); const s0 = t0 + i * 0.18;
+      o.type = 'sine'; o.frequency.value = f; o.connect(g); g.connect(actx.destination);
+      g.gain.setValueAtTime(0.0001, s0); g.gain.exponentialRampToValueAtTime(0.35, s0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s0 + 0.3);
+      o.start(s0); o.stop(s0 + 0.32);
+    });
+  } catch {}
+}
+// Browsers only allow sound after the first tap on the page.
+document.addEventListener('pointerdown', () => { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch {} }, { once: true });
+function checkNewBookings() {
+  const booked = tickets.filter(x => x.status === 'booked' && !x.example);
+  const fresh = booked.filter(x => !seenBooked.has(x.id) && x.createdBy !== user?.uid);
+  booked.forEach(x => seenBooked.add(x.id));
+  if (!seededBooked) { seededBooked = true; return; }
+  if (!fresh.length || !['attendant', 'owner'].includes(role())) return;
+  if (soundOn) chime();
+  try { navigator.vibrate?.([180, 90, 180]); } catch {}
+  toast(`New booking · ${fresh[0].plate}${fresh.length > 1 ? ` and ${fresh.length - 1} more` : ''}`, false, false, 'ok');
 }
 
 // ---- job actions (attendant or owner)
@@ -461,25 +517,77 @@ function headHTML(tk, showPhone) {
     ${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}
     ${showPhone && tk.phone ? `<span>WhatsApp <b>${esc(mask(tk.phone))}</b></span>` : ''}</div>`;
 }
-const alertsHTML = tk => `<div><h3>Updates</h3><ul class="alerts">${(tk.alerts || []).slice().reverse().map(a => `<li><span class="mono">${t(a.at)}</span> ${esc(a.text)}</li>`).join('')}</ul></div>`;
+const alertsHTML = tk => `<div><h3>Updates</h3><ul class="alerts">${(tk.alerts || []).slice().reverse().map(a => `<li><time>${t(a.at)}</time><span>${esc(a.text)}</span></li>`).join('')}</ul></div>`;
+
+const svgI = d => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  clock: svgI('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+  check: svgI('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+  drop: svgI('<path d="M12 3.5C10 6.2 6.5 10.6 6.5 14a5.5 5.5 0 0 0 11 0c0-3.4-3.5-7.8-5.5-10.5z"/>'),
+  x: svgI('<path d="M7 7l10 10M17 7L7 17"/>'),
+  bang: svgI('<path d="M12 6.5v7M12 17.5v.01"/>'),
+  bell: svgI('<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
+  belloff: svgI('<path d="M6 16V11a6 6 0 0 1 9.5-4.9M18 11v5l1.5 2H7"/><path d="M10 20.5a2 2 0 0 0 4 0M4 4l16 16"/>'),
+};
+const HERO = {
+  booked: ['clock', 'Waiting for an attendant', 'We’ve got your booking. An attendant will find your car and check the number plate.'],
+  verified: ['check', 'Car found', 'The attendant has checked your car and will start shortly.'],
+  washing: ['drop', 'Your car is being washed', 'This page updates the moment it’s ready.'],
+  ready: ['check', 'Your car is ready', 'Pay below to close your ticket.'],
+  closed: ['check', 'Paid. Thank you!', 'Your receipt is below.'],
+  cancelled: ['x', 'Booking cancelled', 'Nothing was done to your car.'],
+  noshow: ['bang', 'Wash not done', ''],
+};
+const DONE = ['closed', 'cancelled', 'noshow'];
+function flash(box, list, seen, onChange) {
+  list.forEach(tk => {
+    const prev = seen.get(tk.id);
+    if (prev && prev !== tk.status) {
+      box.querySelector(`[data-id="${CSS.escape(tk.id)}"]`)?.classList.add('bump');
+      onChange?.(tk);
+    }
+    seen.set(tk.id, tk.status);
+  });
+}
 
 function renderCustomer() {
   const box = $('#myTickets');
   const list = mine.filter(id => myTickets.has(id)).map(id => ({ id, ...myTickets.get(id) }));
-  if (!list.length) { box.innerHTML = '<div class="empty">Your ticket appears here after you book, with live updates as the attendant works on your car.</div>'; return; }
-  box.innerHTML = list.map(tk => `<article class="card" data-id="${esc(tk.id)}">
-    <h3>Your ticket</h3>${headHTML(tk, false)}${stepsHTML(tk)}${damageHTML(tk, true)}${photosHTML(tk)}${alertsHTML(tk)}
-    ${tk.status === 'booked' ? '<div class="row"><button class="btn warn" data-act="cancel">Cancel booking</button></div>' : ''}
-    ${tk.status === 'ready' ? payHTML(tk) : ''}
-    ${tk.status === 'closed' ? (tk.rating ? `<div class="pay"><h3>Thanks for your rating</h3>${ratingHTML(tk)}</div>` : rateHTML()) : ''}
-    ${tk.status === 'closed' ? receiptBlock(tk, 'customer') : ''}
-    <p class="err" hidden></p></article>`).join('');
+  // Open tickets, plus anything finished today. Older tickets drop off.
+  const shown = list.filter(tk => !DONE.includes(tk.status) || today(tk.paidAt || tk.cancelledAt || tk.noshowAt || tk.bookedAt));
+  const active = shown.some(tk => !DONE.includes(tk.status));
+  const card = $('#bookCard');
+  card.classList.toggle('collapsed', active && !bookOpen);
+  $('#bookAnother').hidden = !(active && !bookOpen);
+  $('#bookTitle').textContent = active ? 'Need another car washed?' : 'Book a wash for your parked car';
+  box.innerHTML = shown.map(ticketHTML).join('');
+  flash(box, shown, lastSeen.customer, tk => { if (tk.status === 'ready') { try { navigator.vibrate?.([200, 100, 200]); } catch {} } });
+}
+function ticketHTML(tk) {
+  const st = HERO[tk.status] ? tk.status : 'booked';
+  const [ic, title, sub] = HERO[st];
+  const subText = st === 'noshow' ? `${tk.noshowReason || 'The attendant couldn’t complete this wash'}. You haven’t been charged.` : sub;
+  const al = (tk.alerts || []).slice().reverse();
+  return `<article class="card ticket" data-id="${esc(tk.id)}">
+    <div class="hero ${st}"><span class="ico">${ICON[ic]}</span><div><h2>${title}</h2><p>${esc(subText)}</p></div></div>
+    <div class="tbody">
+      <div class="tline"><span class="plate">${esc(tk.plate)}</span><span class="code">Ticket ${esc(code(tk))}</span>${tk.discountPct ? `<span class="chip st-ready">Loyalty −${tk.discountPct}%</span>` : ''}</div>
+      <div class="tk-meta"><span>Bay <b>${esc(bayText(tk))}</b></span><span>${esc(tk.service)}</span>${price(tk) ? `<span>Total <b>₹${price(tk)}</b></span>` : ''}${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}</div>
+      ${['cancelled', 'noshow'].includes(st) ? '' : stepsHTML(tk)}
+      ${damageHTML(tk, true)}${photosHTML(tk)}
+      ${st === 'ready' ? payHTML(tk) : ''}
+      ${st === 'closed' ? (tk.rating ? `<div class="pay"><h3>Thanks for your rating</h3>${ratingHTML(tk)}</div>` : rateHTML()) : ''}
+      ${st === 'closed' ? receiptBlock(tk, 'customer') : ''}
+      ${st === 'booked' ? '<div><button class="link danger" data-act="cancel">Cancel booking</button></div>' : ''}
+      <details class="upd"><summary>All updates (${al.length})</summary><ul class="alerts">${al.map(a => `<li><time>${t(a.at)}</time><span>${esc(a.text)}</span></li>`).join('')}</ul></details>
+      <p class="err" hidden></p>
+    </div></article>`;
 }
 function rateHTML() {
   return `<div class="pay rate"><h3>How was your wash?</h3>
     <div class="starpick" role="group" aria-label="Rating">${[1, 2, 3, 4, 5].map(n => `<button type="button" class="star" data-rate="${n}" aria-label="${n} star${n > 1 ? 's' : ''}" aria-pressed="false">★</button>`).join('')}</div>
     <label>Comment (optional)<input class="rcomment" maxlength="300" placeholder="Anything we should know?"></label>
-    <div class="row"><button class="btn go" data-act="rate">Send rating</button></div></div>`;
+    <button class="btn go big" data-act="rate">Send rating</button></div>`;
 }
 // ---- receipts
 function receiptLines(tk) {
@@ -517,18 +625,20 @@ function receiptBlock(tk, who) {
 }
 
 function payHTML(tk) {
-  const amt = price(tk) ? ` ₹${price(tk)}` : '';
-  return `<div class="pay"><div class="row"><button class="btn go" data-act="pay">Pay${amt} now</button></div>
+  const amt = price(tk) ? `₹${price(tk)}` : '';
+  return `<div class="pay">${amt ? `<div class="row between"><span class="hint">Amount due</span><span class="amount">${amt}</span></div>` : ''}
+    <button class="btn go big" data-act="pay">Pay ${amt} now</button>
     <p class="hint">Demo payment: tapping marks the ticket as paid. No money is taken.</p></div>`;
 }
 
-function photoBtn(kind, has) {
-  return `<button class="btn ${has ? 'alt' : 'go'}" data-photo="${kind}">${has ? 'Retake' : 'Take'} ${kind}-photo</button>`;
+function photoBtn(kind, has, big = true) {
+  return has ? `<button class="link" data-photo="${kind}">Retake ${kind}-photo</button>`
+    : `<button class="btn go${big ? ' big' : ''}" data-photo="${kind}">Take ${kind}-photo</button>`;
 }
-function noshowHTML() {
-  return `<details class="noshow"><summary class="link">Car not found or customer left?</summary>
-    <div class="noshowbox"><label>Reason<select class="nsreason">${NOSHOW_REASONS.map(r => `<option>${esc(r)}</option>`).join('')}</select></label>
-    <div class="row"><button class="btn warn sm" data-act="noshow">Close as not done</button></div></div></details>`;
+function noshowHTML(id) {
+  return `<details class="noshow" data-keepopen="${esc(id)}:ns"><summary class="link">Car not found or customer left?</summary>
+    <div class="noshowbox"><label>Reason<select class="nsreason" data-keep="${esc(id)}:nr">${NOSHOW_REASONS.map(r => `<option>${esc(r)}</option>`).join('')}</select></label>
+    <button class="btn warn" data-act="noshow">Close as not done</button></div></details>`;
 }
 function loyaltyHTML(tk) {
   const v = visits.get(tk.id);
@@ -551,39 +661,117 @@ async function loadVisits(tk) {
   } catch { visits.delete(key); }
   rerender();
 }
+const ago = iso => {
+  if (!iso) return '';
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+  return m < 1 ? 'just now' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+};
+function stage(tk) {
+  const p = tk.photos || {};
+  if (tk.status === 'booked') return [1, 'Find and verify the car'];
+  if (tk.status === 'verified') return !tk.damage ? [2, 'Check for existing damage'] : !p.before ? [3, 'Take the before-photo'] : [4, 'Start the wash'];
+  if (tk.status === 'washing') return !p.after ? [5, 'Wash, then take the after-photo'] : [6, 'Mark the wash complete'];
+  if (tk.status === 'ready') return [0, 'Waiting for payment'];
+  return [0, ''];
+}
+function nowHTML(tk) {
+  const p = tk.photos || {}; const id = esc(tk.id);
+  const [n, title] = stage(tk);
+  let help = '', main = '', more = '';
+  if (tk.status === 'booked') {
+    help = 'Type the number plate exactly as you see it on the car.';
+    main = `${loyaltyHTML(tk)}<label>Number plate on the car<input class="vplate" data-keep="${id}:v" autocomplete="off" autocapitalize="characters" placeholder="Type what you see"></label>
+      <button class="btn go big" data-act="verify">Verify car</button>`;
+  } else if (tk.status === 'verified' && !tk.damage) {
+    help = 'Walk around the car before touching it. Look for scratches, dents and cracks that are already there.';
+    main = dmgOpen.has(tk.id)
+      ? `<label>Describe the damage<input class="dmgnote" data-keep="${id}:d" maxlength="200" placeholder="Scratch on rear bumper, left side"></label>
+         ${p.damage ? '<p class="ok">Damage photo added</p>' : ''}
+         <button class="btn alt" data-photo="damage">${p.damage ? 'Retake' : 'Add'} damage photo</button>
+         <button class="btn go big" data-act="damage">Save damage note</button>`
+      : `<button class="btn go big" data-act="nodamage">No existing damage</button><button class="btn alt big" data-dmg="1">Found damage</button>`;
+    if (dmgOpen.has(tk.id)) more = '<button class="link" data-dmg="0">Back</button>';
+  } else if (tk.status === 'verified' && !p.before) {
+    help = 'Photograph the whole car before you start.';
+    main = photoBtn('before', false);
+    more = '<button class="link" data-act="redodamage">Change damage check</button>';
+  } else if (tk.status === 'verified') {
+    main = '<button class="btn go big" data-act="start">Start wash</button>';
+    more = `${photoBtn('before', true)}<button class="link" data-act="redodamage">Change damage check</button>`;
+  } else if (tk.status === 'washing' && !p.after) {
+    help = 'When you finish, photograph the clean car from the same angle as the before-photo.';
+    main = photoBtn('after', false);
+  } else if (tk.status === 'washing') {
+    main = '<button class="btn go big" data-act="done">Wash complete</button>';
+    more = photoBtn('after', true);
+  } else if (tk.status === 'ready') {
+    main = '<p class="waitpay">The customer pays on their phone. This job closes by itself once they pay.</p>';
+    more = '<button class="link" data-act="paid">Customer paid in cash instead</button>';
+  }
+  return `<div class="nowbox">${n ? `<p class="stepno">Step ${n} of 6</p>` : ''}<h3>${title}</h3>${help ? `<p class="hint">${help}</p>` : ''}${main}${more ? `<div class="row between">${more}</div>` : ''}</div>`;
+}
+function jobHTML(tk, group) {
+  const st = LABEL[tk.status] ? tk.status : 'booked';
+  const open = openJob === tk.id;
+  const locked = tk.status !== 'booked' && tk.attendantUid && tk.attendantUid !== user?.uid;
+  const since = { booked: tk.bookedAt, verified: tk.verifiedAt, washing: tk.startedAt, ready: tk.completedAt }[tk.status] || tk.bookedAt;
+  const age = tk.status === 'booked' ? `waiting ${ago(since)}` : tk.status === 'ready' ? `ready ${ago(since)}` : ago(since);
+  const head = `<button class="jobhead" data-toggle="${esc(tk.id)}" aria-expanded="${open}">
+      <span class="plate">${esc(tk.plate)}</span><span class="where">Bay ${esc(bayText(tk))}</span>
+      <span class="svcl">${esc(tk.service)}${price(tk) ? ` · ₹${price(tk)}` : ''}${group === 'other' ? ` · ${esc(tk.attendant || '')}` : ''}</span>
+      <span class="chip st-${st}">${LABEL[st]}</span><span class="age">${age}</span></button>`;
+  if (!open) return `<article class="job s-${st}${group === 'other' ? ' other' : ''}" data-id="${esc(tk.id)}">${head}</article>`;
+  const wa = waLink(tk);
+  const meta = [`<span>${esc(code(tk))}</span>`, tk.walkUp ? '<span class="ex">Walk-up</span>' : '', tk.discountPct ? `<span class="chip st-ready">Loyalty −${tk.discountPct}%</span>` : '',
+    tk.phone ? `<span>WhatsApp <b>${esc(mask(tk.phone))}</b></span>` : '', tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''].join('');
+  const action = locked
+    ? `<div class="nowbox"><p class="lockmsg"><b>${esc(tk.attendant || 'Another attendant')}</b> is on this job. Only they can update it.</p><button class="link" data-act="takeover">Take over this job</button></div>`
+    : nowHTML(tk);
+  const foot = [wa ? `<a class="btn wa sm" href="${esc(wa)}" target="_blank" rel="noopener">Send WhatsApp update</a>` : '',
+    !locked && ['booked', 'verified'].includes(tk.status) ? noshowHTML(tk.id) : ''].join('');
+  return `<article class="job open s-${st}${group === 'other' ? ' other' : ''}" data-id="${esc(tk.id)}">${head}
+    <div class="jobbody"><div class="tk-meta">${meta}</div>${stepsHTML(tk)}${tk.damage ? damageHTML(tk, false) : ''}${photosHTML(tk)}
+    ${action}${foot ? `<div class="jobfoot">${foot}</div>` : ''}<p class="err" hidden></p></div></article>`;
+}
+// Typed text and open drop-downs survive the live redraws.
+function saveDrafts(box) {
+  const d = {}, o = {};
+  box.querySelectorAll('[data-keep]').forEach(i => { d[i.dataset.keep] = i.value; });
+  box.querySelectorAll('[data-keepopen]').forEach(i => { o[i.dataset.keepopen] = i.open; });
+  const a = document.activeElement; const f = box.contains(a) ? a?.dataset?.keep : null;
+  return { d, o, f, sel: f && a.setSelectionRange ? [a.selectionStart, a.selectionEnd] : null };
+}
+function restoreDrafts(box, k) {
+  box.querySelectorAll('[data-keep]').forEach(i => { if (k.d[i.dataset.keep] != null) i.value = k.d[i.dataset.keep]; });
+  box.querySelectorAll('[data-keepopen]').forEach(i => { if (k.o[i.dataset.keepopen]) i.open = true; });
+  if (k.f) {
+    const el = box.querySelector(`[data-keep="${CSS.escape(k.f)}"]`);
+    if (el) { el.focus({ preventScroll: true }); try { if (k.sel) el.setSelectionRange(...k.sel); } catch {} }
+  }
+}
 function renderQueue() {
   const box = $('#queue');
-  const open = tickets.filter(x => !['closed', 'cancelled', 'noshow'].includes(x.status));
+  const keep = saveDrafts(box);
+  const uid = user?.uid;
+  const asc = (a, b) => (a.bookedAt || '').localeCompare(b.bookedAt || '');
+  const open = tickets.filter(x => !DONE.includes(x.status));
+  const mineJ = open.filter(x => x.status !== 'booked' && (!x.attendantUid || x.attendantUid === uid)).sort(asc);
+  const newJ = open.filter(x => x.status === 'booked').sort(asc);
+  const otherJ = open.filter(x => x.status !== 'booked' && x.attendantUid && x.attendantUid !== uid).sort(asc);
+  newJ.forEach(loadVisits);
+  if (openJob && !open.some(x => x.id === openJob)) openJob = undefined;
+  if (openJob === undefined) openJob = mineJ[0]?.id || newJ[0]?.id;
   const doneToday = tickets.filter(x => x.status === 'closed' && today(x.paidAt));
-  const done = doneToday.length ? `<details class="card donelist"><summary><b>Completed today (${doneToday.length})</b></summary>${doneToday.map(tk =>
-    `<div class="donerow" data-id="${esc(tk.id)}"><span class="plate sm">${esc(tk.plate)}</span><span>${esc(code(tk))} · ₹${price(tk)} · ${t(tk.paidAt)}</span>${receiptWa(tk) ? `<a class="btn alt sm" href="${esc(receiptWa(tk))}" target="_blank" rel="noopener">Send receipt</a>` : ''}</div>`).join('')}</details>` : '';
-  if (!open.length) { box.innerHTML = '<div class="empty">No open bookings. New tickets appear here the moment a customer books.</div>' + done; return; }
-  box.innerHTML = open.map(tk => {
-    const p = tk.photos || {};
-    let actions = '';
-    if (tk.status === 'booked') {
-      loadVisits(tk);
-      actions = `${loyaltyHTML(tk)}<div class="verify"><label>Car number on the plate<input class="vplate" autocomplete="off" placeholder="Type what you see"></label><button class="btn go" data-act="verify">Verify car</button></div>${noshowHTML()}`;
-    }
-    if (tk.status === 'verified') {
-      const dmg = tk.damage
-        ? `${damageHTML(tk, false)}<div class="row"><button class="link" data-act="redodamage">Change damage check</button></div>`
-        : `<div class="dmgcheck"><h3>1. Existing damage check</h3><p class="hint">Walk around the car before touching it. Record any scratch, dent or crack that is already there.</p>
-           <div class="row"><button class="btn alt" data-act="nodamage">No existing damage</button></div>
-           <label>Or describe the damage<input class="dmgnote" maxlength="200" placeholder="Scratch on rear bumper, left side"></label>
-           <div class="row"><button class="btn alt" data-photo="damage">${p.damage ? 'Retake' : 'Add'} damage photo</button><button class="btn alt" data-act="damage">Save damage note</button></div></div>`;
-      const ready = !!(tk.damage && p.before);
-      actions = `${dmg}<h3>2. Before-photo and start</h3><div class="row">${photoBtn('before', !!p.before)}<button class="btn ${ready ? 'go' : 'alt'}" data-act="start" ${ready ? '' : 'disabled'}>Start wash</button></div>${ready ? '' : `<p class="hint">${tk.damage ? '' : 'Do the damage check and '}${p.before ? '' : 'take the before-photo '}to unlock Start wash.</p>`}${noshowHTML()}`;
-    }
-    if (tk.status === 'washing') actions = `<div class="row">${photoBtn('after', !!p.after)}<button class="btn ${p.after ? 'go' : 'alt'}" data-act="done" ${p.after ? '' : 'disabled'}>Wash complete</button></div>${p.after ? '' : '<p class="hint">Take the after-photo to unlock Wash complete.</p>'}`;
-    if (tk.status === 'ready') actions = `<p class="waitpay">Waiting for the customer to pay on their ticket. This job closes by itself once they tap Pay.</p><div class="row"><button class="link" data-act="paid">Customer paid in cash instead</button></div>`;
-    if (tk.status !== 'booked' && tk.attendantUid && tk.attendantUid !== user?.uid) {
-      actions = `<p class="waitpay"><b>${esc(tk.attendant || 'Another attendant')}</b> is on this job. Only they can update it.</p><div class="row"><button class="link" data-act="takeover">Take over this job</button></div>`;
-    }
-    const wa = waLink(tk);
-    const waBtn = wa ? `<a class="btn alt wa" href="${esc(wa)}" target="_blank" rel="noopener">Send WhatsApp update</a><span class="hint">Opens WhatsApp with the message ready. Tap send.</span>` : '';
-    return `<article class="card" data-id="${esc(tk.id)}">${headHTML(tk, true)}${stepsHTML(tk)}${tk.status !== 'verified' ? damageHTML(tk, false) : ''}${photosHTML(tk)}${actions}${waBtn ? `<div class="row">${waBtn}</div>` : ''}<p class="err" hidden></p></article>`;
-  }).join('') + done;
+  const done = doneToday.length ? `<details class="card donelist" data-keepopen="done"><summary>Completed today (${doneToday.length})</summary>${doneToday.map(tk =>
+    `<div class="donerow" data-id="${esc(tk.id)}"><span class="plate sm">${esc(tk.plate)}</span><span>₹${price(tk)} · ${t(tk.paidAt)}</span>${receiptWa(tk) ? `<a class="btn alt sm" href="${esc(receiptWa(tk))}" target="_blank" rel="noopener">Send receipt</a>` : ''}</div>`).join('')}</details>` : '';
+  const sec = (title, list, group) => list.length
+    ? `<div class="qhead"><h3>${title}</h3><span>${list.length}</span></div><div class="joblist">${list.map(tk => jobHTML(tk, group)).join('')}</div>` : '';
+  box.innerHTML = (open.length
+    ? sec('My jobs', mineJ, 'mine') + sec('New bookings', newJ, 'new') + sec('Other attendants', otherJ, 'other')
+    : `<div class="empty"><b>No open bookings</b><br>New bookings appear here the moment a customer books${soundOn ? ', with a sound' : ''}.</div>`) + done;
+  restoreDrafts(box, keep);
+  flash(box, open, lastSeen.queue);
+  document.title = newJ.length && can('attendant') ? `(${newJ.length}) ${brand}` : brand;
 }
 
 function renderSecurity() {
@@ -591,7 +779,7 @@ function renderSecurity() {
   const n = s => todays.filter(x => s.includes(x.status)).length;
   $('#stats').innerHTML = [
     ['Waiting', n(['booked'])], ['In progress', n(['verified', 'washing'])], ['Ready for owner', n(['ready'])], ['Closed today', n(['closed'])],
-  ].map(([l, v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
+  ].map(([l, v]) => `<div class="stat"><span>${l}</span><b>${v}</b></div>`).join('');
   $('#logBody').innerHTML = todays.length ? todays.map(tk => {
     const st = LABEL[tk.status] ? tk.status : 'booked';
     const ph = (tk.photos?.before ? 'Before' : '') + (tk.photos?.before && tk.photos?.after ? ' + ' : '') + (tk.photos?.after ? 'After' : '');
@@ -621,19 +809,20 @@ function renderSecurity() {
 
 function renderStaff() {
   const body = $('#staffBody');
-  if (!staff.length) { body.innerHTML = '<tr><td colspan="5"><div class="empty">No staff accounts yet.</div></td></tr>'; return; }
+  if (!staff.length) { body.innerHTML = '<div class="empty">No staff accounts yet.</div>'; return; }
   const rank = { pending: 0, attendant: 1, security: 2, owner: 3, none: 4 };
   body.innerHTML = staff.slice().sort((a, b) => (rank[a.role] ?? 9) - (rank[b.role] ?? 9)).map(s => {
     const self = s.uid === user?.uid;
-    const btns = self || s.role === 'owner' ? '<span class="hint">–</span>' : ['attendant', 'security', 'none']
+    const btns = self || s.role === 'owner' ? '' : ['attendant', 'security', 'none']
       .filter(r => r !== s.role)
-      .map(r => `<button class="btn ${r === 'none' ? 'warn' : 'alt'} sm" data-role="${r}" data-uid="${esc(s.uid)}">${r === 'none' ? 'Remove access' : 'Make ' + ROLE_LABEL[r].toLowerCase()}</button>`).join(' ');
-    const siteCell = s.role === 'owner' ? 'All sites'
+      .map(r => `<button class="btn ${r === 'none' ? 'warn' : s.role === 'pending' ? 'go' : 'alt'} sm" data-role="${r}" data-uid="${esc(s.uid)}">${r === 'none' ? 'Remove access' : 'Make ' + ROLE_LABEL[r].toLowerCase()}</button>`).join('');
+    const siteCell = s.role === 'owner' ? '<span class="hint">All sites</span>'
       : SITES.length > 1 && !self
         ? `<select class="sitesel" data-site-uid="${esc(s.uid)}" aria-label="Site for ${esc(s.name || s.email)}">${SITES.map(x => `<option value="${esc(x.id)}" ${(s.site || DEFAULT_SITE) === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`
-        : esc(siteName(s.site));
-    return `<tr><td>${esc(s.name || '–')}${self ? ' (you)' : ''}</td><td>${esc(s.email || '')}</td>
-      <td><span class="chip ${s.role === 'pending' ? 'st-booked' : s.role === 'none' ? 'st-closed' : 'st-ready'}">${esc(ROLE_LABEL[s.role] || s.role)}</span></td><td>${siteCell}</td><td><div class="row">${btns}</div></td></tr>`;
+        : `<span class="hint">${esc(siteName(s.site))}</span>`;
+    return `<div class="card staffcard"><div class="nm"><b>${esc(s.name || '–')}${self ? ' (you)' : ''}</b><small>${esc(s.email || '')}</small></div>
+      <span class="chip ${s.role === 'pending' ? 'st-booked' : s.role === 'none' ? 'st-noshow' : 'st-ready'}">${esc(ROLE_LABEL[s.role] || s.role)}</span>
+      <div class="row" style="flex:1 1 100%">${siteCell}${btns}</div></div>`;
   }).join('');
 }
 
@@ -643,9 +832,11 @@ function renderShift() {
   const sh = shifts.find(x => x.uid === user?.uid); const sessions = sh?.sessions || [];
   const on = sessions.length && !sessions[sessions.length - 1].out;
   const mins = sessions.reduce((m, x) => m + ((x.out ? new Date(x.out) : new Date()) - new Date(x.in)) / 60000, 0);
-  box.innerHTML = `<div class="row" style="justify-content:space-between"><div><h3>${on ? 'On shift' : 'Off shift'}</h3>
-    <p class="hint">${sessions.length ? `Started ${t(sessions[0].in)} · ${fmtMin(mins)} today` : 'Start your shift when you arrive at the site.'} · ${esc(siteName(mySite()))}</p></div>
-    <button class="btn ${on ? 'alt' : 'go'}" data-shift="${on ? 'out' : 'in'}">${on ? 'End shift' : 'Start shift'}</button></div>`;
+  box.className = 'shiftbar' + (on ? ' on' : '');
+  box.innerHTML = `<div class="st"><span class="sdot"></span><div><b>${on ? 'On shift' : 'Off shift'}</b>
+    <small>${sessions.length ? `Since ${t(sessions[0].in)} · ${fmtMin(mins)} today` : 'Tap Start when you arrive'}</small></div></div>
+    <div class="acts"><button class="iconbtn" data-sound aria-pressed="${soundOn}" aria-label="Sound for new bookings" title="Sound for new bookings">${soundOn ? ICON.bell : ICON.belloff}</button>
+    <button class="btn ${on ? 'alt' : 'go'} sm" data-shift="${on ? 'out' : 'in'}">${on ? 'End shift' : 'Start shift'}</button></div>`;
 }
 async function shiftAction(kind) {
   const id = `${user.uid}_${dayKey()}`;
@@ -661,7 +852,7 @@ async function shiftAction(kind) {
 function walkServices() {
   const box = $('#w-services'); if (!box || box.dataset.done) return;
   box.dataset.done = '1';
-  box.innerHTML = `<legend>Services</legend><div class="svcgrid">${Object.keys(business.prices || {}).map(n =>
+  box.innerHTML = `<legend>Services</legend><div class="svcgrid addons">${Object.keys(business.prices || {}).map(n =>
     `<label class="svc"><input type="checkbox" value="${esc(n)}"><span>${esc(n)}</span><b>${itemPrice(n) ? '₹' + itemPrice(n) : ''}</b></label>`).join('')}</div>
     <p class="total">Total <b id="w-total">₹0</b></p>`;
   box.addEventListener('change', () => {
@@ -693,7 +884,8 @@ $('#walkForm')?.addEventListener('submit', async e => {
   try {
     await setDoc(doc(collection(fs, 'tickets')), tk);
     $('#walkForm').reset(); $('#w-total').textContent = '₹0';
-    $('#walkup').open = false;
+    $('#walkDlg').close();
+    toast(`Walk-up booking created · ${tk.plate}`, false, false, 'ok');
   } catch { err.textContent = 'Booking didn’t save. Check your connection and try again.'; err.hidden = false; }
 });
 
@@ -717,14 +909,24 @@ function renderDash() {
   const rated = closed.filter(x => x.rating);
   const avgRating = avg(rated.map(x => x.rating));
   const tiles = [
-    ['Washes completed', String(closed.length), `${list.length} booked`],
+    ['Washes', String(closed.length), `${list.length} booked`],
     ['Revenue', priced ? inr(revenue) : '–', priced ? 'From paid tickets' : 'Add prices in settings.js'],
-    ['Average wash time', fmtMin(avg(closed.map(x => mins(x.startedAt, x.completedAt)))), 'Start to finish'],
-    ['Average wait', fmtMin(avg(closed.map(x => mins(x.bookedAt, x.startedAt)))), 'Booking to start'],
-    ['Customer rating', avgRating == null ? '–' : avgRating.toFixed(1) + ' / 5', `${rated.length} rating${rated.length === 1 ? '' : 's'}`],
-    ['Damage found before wash', String(list.filter(x => x.damage?.found).length), `${list.filter(x => x.status === 'cancelled').length} cancelled · ${list.filter(x => x.status === 'noshow').length} not done`],
+    ['Rating', avgRating == null ? '–' : avgRating.toFixed(1) + ' ★', `${rated.length} rating${rated.length === 1 ? '' : 's'}`],
+    ['Wash time', fmtMin(avg(closed.map(x => mins(x.startedAt, x.completedAt)))), 'Average, start to finish'],
   ];
-  $('#dashStats').innerHTML = tiles.map(([l, v, s]) => `<div class="stat"><span>${l}</span><b>${v}</b><small>${s}</small></div>`).join('');
+  const tile = ([l, v, s]) => `<div class="stat"><span>${l}</span><b>${v}</b>${s ? `<small>${s}</small>` : ''}</div>`;
+  $('#dashStats').innerHTML = tiles.map(tile).join('');
+  $('#dashMore').innerHTML = [
+    ['Bookings', String(list.length), `${list.filter(x => x.walkUp).length} walk-up`],
+    ['Average wait', fmtMin(avg(closed.map(x => mins(x.bookedAt, x.startedAt)))), 'Booking to start'],
+    ['Damage found', String(list.filter(x => x.damage?.found).length), 'Before washing'],
+    ['Cancelled', String(list.filter(x => x.status === 'cancelled').length), 'By the customer'],
+    ['Not done', String(list.filter(x => x.status === 'noshow').length), 'Car not found or left'],
+    ['Loyalty washes', String(list.filter(x => x.discountPct).length), 'Discount applied'],
+  ].map(tile).join('');
+  $('#revMeta').textContent = priced ? inr(revenue) : '';
+  $('#bookMeta').textContent = `${list.length} booking${list.length === 1 ? '' : 's'}`;
+  $('#cmMeta').textContent = rated.filter(x => x.ratingComment).length ? String(rated.filter(x => x.ratingComment).length) : '';
 
   // Bookings by hour of day
   const counts = Array(24).fill(0);
@@ -817,7 +1019,9 @@ function renderRevenue(inSite) {
 function renderTeam() {
   const box = $('#teamBody'); if (!box) return;
   const people = staff.filter(p => ['attendant', 'owner'].includes(p.role) && (dashSite === 'all' || (p.site || DEFAULT_SITE) === dashSite || p.role === 'owner'));
-  if (!people.length) { box.innerHTML = '<tr><td colspan="5" class="hint">No attendants yet. Approve staff on the Staff tab.</td></tr>'; return; }
+  if (!people.length) { box.innerHTML = '<tr><td colspan="5" class="hint">No attendants yet. Approve staff on the Staff tab.</td></tr>'; $('#teamMeta').textContent = ''; return; }
+  const onNow = people.filter(p => { const ss = shifts.find(x => x.uid === p.uid)?.sessions || []; return ss.length && !ss[ss.length - 1].out; }).length;
+  $('#teamMeta').textContent = `${onNow} on shift`;
   box.innerHTML = people.map(p => {
     const sh = shifts.find(x => x.uid === p.uid);
     const sessions = sh?.sessions || [];
@@ -924,6 +1128,14 @@ function reportAction(a, btn) {
 
 // ---- delegated events
 document.addEventListener('click', async e => {
+  const tg = e.target.closest('[data-toggle]');
+  if (tg) { openJob = openJob === tg.dataset.toggle ? null : tg.dataset.toggle; renderQueue(); return; }
+  const dm = e.target.closest('[data-dmg]');
+  if (dm) { const id = dm.closest('[data-id]').dataset.id; dm.dataset.dmg === '1' ? dmgOpen.add(id) : dmgOpen.delete(id); renderQueue(); return; }
+  if (e.target.closest('[data-sound]')) { soundOn = !soundOn; store.set('pwt-sound', soundOn); renderShift(); if (soundOn) chime(); return; }
+  if (e.target.closest('#walkFab')) { walkServices(); $('#walkErr').hidden = true; $('#walkDlg').showModal(); return; }
+  if (e.target.closest('#walkClose')) { $('#walkDlg').close(); return; }
+  if (e.target.closest('#bookAnother')) { bookOpen = true; renderCustomer(); $('#f-plate').focus(); return; }
   const det = e.target.closest('[data-detail]');
   if (det) { detailId = det.dataset.detail || null; renderSecurity(); if (detailId) $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
   const rb = e.target.closest('[data-role]');
@@ -972,7 +1184,12 @@ document.addEventListener('click', async e => {
     : a === 'rate' ? { rating: card.dataset.rating, comment: card.querySelector('.rcomment')?.value } : undefined;
   const msg = await act(id, b.dataset.act, extra);
   b.disabled = false;
-  if (msg && errEl) { errEl.textContent = msg; errEl.hidden = false; }
+  if (msg && errEl) { errEl.textContent = msg; errEl.hidden = false; errEl.scrollIntoView({ block: 'nearest' }); }
+  else if (!msg) {
+    if (a === 'damage' || a === 'nodamage') dmgOpen.delete(id);
+    const said = { verify: 'Car verified', nodamage: 'No damage recorded', damage: 'Damage recorded', start: 'Wash started', done: 'Wash complete. Customer notified', paid: 'Cash payment recorded', noshow: 'Closed as not done', takeover: 'Job is yours now', pay: 'Payment done. Thank you!', rate: 'Thanks for your rating' }[a];
+    if (said) toast(said, false, false, 'ok');
+  }
 });
 document.addEventListener('change', async e => {
   const ss = e.target.closest('[data-site-uid]');
@@ -989,8 +1206,8 @@ let camFor = null;
 const note = Object.assign(document.createElement('div'), { className: 'toast', hidden: true });
 document.body.append(note);
 let noteTimer;
-function toast(text, bad, keep) {
-  note.textContent = text; note.classList.toggle('bad', !!bad); note.hidden = false;
+function toast(text, bad, keep, cls) {
+  note.textContent = text; note.className = 'toast' + (bad ? ' bad' : cls ? ' ' + cls : ''); note.hidden = false;
   clearTimeout(noteTimer); if (!keep) noteTimer = setTimeout(() => { note.hidden = true; }, bad ? 6000 : 2500);
 }
 document.addEventListener('click', e => {
@@ -1004,7 +1221,7 @@ cam.addEventListener('change', async () => {
   if (!f || !job) return;
   toast('Saving photo…', false, true);
   const msg = await addPhoto(job.id, job.kind, f);
-  toast(msg || 'Photo saved', !!msg);
+  toast(msg || 'Photo saved', !!msg, false, 'ok');
 });
 
 // ---- download today's log
@@ -1093,9 +1310,14 @@ updateTotal();
     rm.innerHTML = opts.join('');
   }
   const zi = $('#zoneInfo');
-  if (zi) { zi.hidden = !(urlZone || SITES.length > 1); zi.textContent = `${siteName(urlSite)}${urlZone ? ' · ' + urlZone : ''}`; }
+  if (zi) { zi.hidden = !urlZone; zi.textContent = `You’re parked at ${urlZone}`; }
 })();
 setMode(false);
+soundOn = store.get('pwt-sound', true);
+$('#brandName').textContent = brand;
+if (!store.get('pwt-howto-seen', false)) { $('#howto').open = true; store.set('pwt-howto-seen', true); }
+// Keep "waiting 5 min" labels fresh without redrawing while someone types.
+setInterval(() => { if (current === 'attendant' && !$('#queue').contains(document.activeElement)) renderQueue(); }, 60000);
 const hashTab = location.hash.replace('#', '');
 show(TABS.includes(hashTab) ? hashTab : store.get('pwt-tab', 'customer'));
 watchMine();

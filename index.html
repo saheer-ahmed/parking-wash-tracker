@@ -5,194 +5,335 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>Parking Wash Tracker</title>
+<title>Parking Wash</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#10231C">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Black&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap">
 <style>
-/* Layout: one column tool, role switcher on top; booking form, attendant queue and security log share one ticket model. */
+/* One font (Archivo), one set of colour tokens for light and dark, one status palette used everywhere. */
 :root{
-  --bg:#F2EFE6; --surface:#FBFAF5; --ink:#10231C; --muted:#4A5A53; --line:#D6D0C0;
-  --accent:#F2C230; --accent-ink:#10231C; --brand:#10231C; --brand-ink:#F2EFE6;
-  --s-wait:#8A5A00; --s-wait-bg:#FBEBC4; --s-work:#0B5A8A; --s-work-bg:#D8EAF6;
-  --s-ready:#1E6B3A; --s-ready-bg:#D7EEDD; --s-done:#4A5A53; --s-done-bg:#E6E2D6;
-  --danger:#A3341F;
-  --f-display:'Archivo Black', 'Arial Black', Arial, sans-serif;
-  --f-body:'Archivo', Arial, sans-serif;
-  --f-mono:'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --bg:#F3F1EA; --surface:#FFFFFF; --surface-2:#F6F4EE; --ink:#13261F; --muted:#5B6963; --line:#E3DFD4; --line-2:#CFC9BA;
+  --bar:#10231C; --bar-ink:#F3F1EA; --bar-muted:#A9B9B1;
+  --accent:#F2C230; --accent-ink:#13261F; --accent-soft:#FBF0C8;
+  --wait:#8A5A00; --wait-bg:#FCEFC9; --work:#0B5A8A; --work-bg:#DDECF8;
+  --ready:#1E6B3A; --ready-bg:#DBF0E1; --done:#55625C; --done-bg:#ECE9E1; --bad:#A3341F; --bad-bg:#F8E2DB;
+  --shadow:0 1px 2px rgba(16,35,28,.06),0 6px 20px rgba(16,35,28,.06);
+  --r:16px; --r-sm:12px;
+  --f:'Archivo',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+  color-scheme:light;
 }
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#0E1A15; --surface:#16261F; --ink:#ECE8DC; --muted:#A9B7AF; --line:#2C4037;
-  --accent:#F2C230; --accent-ink:#10231C; --brand:#F2C230; --brand-ink:#10231C;
-  --s-wait:#F6D27A; --s-wait-bg:#3A2E10; --s-work:#8CC6EC; --s-work-bg:#13324A;
-  --s-ready:#8FD5A5; --s-ready-bg:#173B25; --s-done:#B7C2BC; --s-done-bg:#25332D;
-  --danger:#F09A86; color-scheme:dark}}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0C1713; --surface:#14221C; --surface-2:#1A2B24; --ink:#ECE8DC; --muted:#A2B1A9; --line:#24362E; --line-2:#33493F;
+  --bar:#0F1C17; --bar-ink:#ECE8DC; --bar-muted:#8FA198;
+  --accent:#F2C230; --accent-ink:#13261F; --accent-soft:#3A3113;
+  --wait:#F6D27A; --wait-bg:#3A2E10; --work:#8CC6EC; --work-bg:#12304A;
+  --ready:#8FD5A5; --ready-bg:#163A24; --done:#B2BEB8; --done-bg:#23322B; --bad:#F2A08C; --bad-bg:#43211A;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25); color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0E1A15; --surface:#16261F; --ink:#ECE8DC; --muted:#A9B7AF; --line:#2C4037;
-  --accent:#F2C230; --accent-ink:#10231C; --brand:#F2C230; --brand-ink:#10231C;
-  --s-wait:#F6D27A; --s-wait-bg:#3A2E10; --s-work:#8CC6EC; --s-work-bg:#13324A;
-  --s-ready:#8FD5A5; --s-ready-bg:#173B25; --s-done:#B7C2BC; --s-done-bg:#25332D;
-  --danger:#F09A86; color-scheme:dark}
+  --bg:#0C1713; --surface:#14221C; --surface-2:#1A2B24; --ink:#ECE8DC; --muted:#A2B1A9; --line:#24362E; --line-2:#33493F;
+  --bar:#0F1C17; --bar-ink:#ECE8DC; --bar-muted:#8FA198;
+  --accent:#F2C230; --accent-ink:#13261F; --accent-soft:#3A3113;
+  --wait:#F6D27A; --wait-bg:#3A2E10; --work:#8CC6EC; --work-bg:#12304A;
+  --ready:#8FD5A5; --ready-bg:#163A24; --done:#B2BEB8; --done-bg:#23322B; --bad:#F2A08C; --bad-bg:#43211A;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25); color-scheme:dark}
+
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.45;padding-inline:16px;padding-block:20px 48px}
-.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
-header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
-h1{font-family:var(--f-display);font-weight:400;font-size:clamp(26px,5vw,38px);line-height:1;margin:0;text-transform:uppercase;letter-spacing:.01em}
-.sub{color:var(--muted);margin:6px 0 0;font-size:15px}
-.live{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
-.dot.on{background:var(--s-ready)}
-nav{display:flex;gap:6px;flex-wrap:wrap;border-bottom:2px solid var(--ink);padding-bottom:0}
-nav button{font:600 15px var(--f-body);background:none;color:var(--muted);border:0;border-bottom:4px solid transparent;padding:10px 14px 8px;cursor:pointer;min-height:44px}
-nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
-button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
-.panel{display:flex;flex-direction:column;gap:16px}
-.card{background:var(--surface);border:1px solid var(--line);padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
-h2{font-size:20px;margin:0;font-weight:700;text-wrap:balance}
-h3{font-size:16px;margin:0;font-weight:700}
-.hint{color:var(--muted);font-size:14px;margin:0}
-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-form .full{grid-column:1/-1}
-label{display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px}
-input,select{font:16px var(--f-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-bottom:2px solid var(--ink);padding:10px;min-height:44px;width:100%}
-.check{flex-direction:row;align-items:flex-start;gap:10px;font-weight:500;line-height:1.4}
-.check input{width:22px;height:22px;min-height:0;flex:none;margin-top:1px}
-.btn{font:700 15px var(--f-body);border:2px solid var(--ink);background:var(--ink);color:var(--bg);padding:10px 16px;min-height:44px;cursor:pointer}
-.btn.alt{background:transparent;color:var(--ink)}
-.btn.go{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-.btn.warn{background:transparent;color:var(--danger);border-color:var(--danger)}
-.btn:disabled{opacity:.45;cursor:not-allowed}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 var(--f);font-variant-numeric:tabular-nums;-webkit-tap-highlight-color:transparent}
+img{max-width:100%}
+h2{font-size:22px;line-height:1.2;margin:0;font-weight:800;letter-spacing:-.01em;text-wrap:balance}
+h3{font-size:17px;line-height:1.25;margin:0;font-weight:700}
+h4{font-size:15px;margin:8px 0 0}
+p{margin:0}
+.hint{color:var(--muted);font-size:14px}
+.wrap{max-width:760px;margin:0 auto;padding:16px 16px 120px;display:flex;flex-direction:column;gap:16px}
+body.wide .wrap{max-width:1040px}
+
+/* App bar and tabs */
+.appbar{background:var(--bar);color:var(--bar-ink);padding:calc(10px + env(safe-area-inset-top)) 16px 10px;position:sticky;top:0;z-index:20}
+.appbar-in{max-width:1040px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brandrow{display:flex;align-items:center;gap:10px;min-width:0}
+.logo{width:34px;height:34px;border-radius:10px;background:var(--accent);display:grid;place-items:center;flex:none}
+.logo svg{width:18px;height:18px}
+.brandtxt{display:flex;flex-direction:column;min-width:0}
+.brandtxt b{font-size:17px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+.brandtxt small{font-size:12.5px;color:var(--bar-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--bar-muted);flex:none}
+.who b{color:var(--bar-ink);font-weight:600}
+.who .link{color:var(--bar-ink)}
+.live{display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--bar-muted)}
+.dot.on{background:#5BD38A;box-shadow:0 0 0 3px rgba(91,211,138,.2)}
+.whoName{display:flex;flex-direction:column;align-items:flex-end;line-height:1.2}
+nav.tabs{max-width:1040px;margin:10px auto 0;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+nav.tabs::-webkit-scrollbar{display:none}
+nav.tabs button{flex:none;font:600 14.5px var(--f);color:var(--bar-muted);background:transparent;border:0;border-radius:999px;padding:8px 14px;min-height:38px;cursor:pointer}
+nav.tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
+@media (max-width:520px){.live span:last-child{display:none}.whoName small{display:none}}
+
+/* Basic pieces */
+.panel{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow);min-width:0}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.mono{font-family:var(--f-mono);font-size:14px}
-.plate{font-family:var(--f-mono);font-weight:500;font-size:17px;letter-spacing:.04em;background:var(--bg);border:1.5px solid var(--ink);padding:2px 8px;display:inline-block}
-.chip{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 8px;display:inline-block}
-.st-booked{color:var(--s-wait);background:var(--s-wait-bg)}
-.st-verified,.st-washing{color:var(--s-work);background:var(--s-work-bg)}
-.st-ready{color:var(--s-ready);background:var(--s-ready-bg)}
-.st-closed,.st-cancelled{color:var(--s-done);background:var(--s-done-bg)}
-.ex{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border:1px dashed var(--muted);padding:2px 6px}
+.between{justify-content:space-between}
+label{display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px}
+input,select,textarea{font:16px var(--f);color:var(--ink);background:var(--surface-2);border:1.5px solid var(--line-2);border-radius:var(--r-sm);padding:12px;min-height:50px;width:100%}
+input:focus,select:focus{border-color:var(--ink);outline:none}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.check{flex-direction:row;align-items:flex-start;gap:12px;font-weight:500;line-height:1.45;font-size:14.5px}
+.check input{width:24px;height:24px;min-height:0;flex:none;margin:0;accent-color:var(--ink)}
+.btn{font:700 15.5px var(--f);border:1.5px solid var(--ink);background:var(--ink);color:var(--surface);border-radius:var(--r-sm);padding:12px 18px;min-height:50px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;transition:transform .08s,filter .15s}
+.btn:active{transform:scale(.98)}
+.btn.go{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.alt{background:var(--surface);color:var(--ink);border-color:var(--line-2)}
+.btn.warn{background:transparent;color:var(--bad);border-color:var(--bad)}
+.btn.wa{background:var(--surface);color:var(--ready);border-color:var(--ready)}
+.btn.big{width:100%;min-height:58px;font-size:17px}
+.btn.sm{padding:8px 12px;min-height:40px;font-size:14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.link{font:600 14.5px var(--f);background:none;border:0;padding:8px 2px;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer;min-height:40px}
+.link.danger{color:var(--bad)}
+.err{color:var(--bad);font-size:14px;font-weight:600}
+.ok{color:var(--ready);font-size:14px;font-weight:600}
+.notice{background:var(--wait-bg);color:var(--wait);padding:12px 14px;border-radius:var(--r-sm);font-size:14px;font-weight:600}
+.empty{border:2px dashed var(--line-2);border-radius:var(--r);padding:28px 20px;text-align:center;color:var(--muted)}
+.mono{font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.plate{font-weight:800;font-size:15.5px;letter-spacing:.07em;background:#fff;color:#111;border:2px solid #111;border-radius:6px;padding:2px 8px;display:inline-block;white-space:nowrap;line-height:1.35}
+.plate.sm{font-size:13px;padding:1px 6px}
+.chip{font-size:12px;font-weight:700;letter-spacing:.03em;padding:4px 10px;border-radius:999px;display:inline-block;white-space:nowrap}
+.st-booked{color:var(--wait);background:var(--wait-bg)}
+.st-verified,.st-washing{color:var(--work);background:var(--work-bg)}
+.st-ready{color:var(--ready);background:var(--ready-bg)}
+.st-closed{color:var(--done);background:var(--done-bg)}
+.st-cancelled,.st-noshow{color:var(--bad);background:var(--bad-bg)}
+.ex{font-size:11.5px;font-weight:700;color:var(--muted);border:1px dashed var(--muted);padding:2px 8px;border-radius:999px}
+.toast{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:12px 18px;border-radius:12px;font-weight:700;z-index:60;max-width:calc(100vw - 32px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.toast.bad{background:var(--bad);color:#fff}
+.toast.ok{background:var(--accent);color:var(--accent-ink)}
+
+/* Progress */
 .steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
-.steps li{border-top:4px solid var(--line);padding-top:6px;font-size:13px;color:var(--muted);min-width:0}
-.steps li.done{border-top-color:var(--ink);color:var(--ink);font-weight:600}
+.steps li{border-top:5px solid var(--line);border-radius:3px;padding-top:6px;font-size:12px;color:var(--muted);min-width:0;line-height:1.25}
+.steps li.done{border-top-color:var(--ready);color:var(--ink);font-weight:600}
 .steps li.now{border-top-color:var(--accent);color:var(--ink);font-weight:700}
-.steps time{display:block;font-family:var(--f-mono);font-size:12px;font-weight:500;color:var(--muted)}
+.steps time{display:block;font-size:11.5px;font-weight:500;color:var(--muted)}
 .tk-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between}
-.tk-meta{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--muted);font-size:14px}
+.tk-meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--muted);font-size:14px}
 .tk-meta b{color:var(--ink);font-weight:600}
 .photos{display:flex;gap:8px;flex-wrap:wrap}
 .photos figure{margin:0;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
-.photos img{width:120px;height:90px;object-fit:cover;border:1px solid var(--line)}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.stat{background:var(--surface);border:1px solid var(--line);padding:12px 14px}
-.stat b{display:block;font-family:var(--f-display);font-weight:400;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}
-.stat span{font-size:13px;color:var(--muted);font-weight:600}
-.tablebox{overflow-x:auto;border:1px solid var(--line);background:var(--surface)}
-table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
-th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
-td.t{font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.empty{border:2px dashed var(--line);padding:24px;text-align:center;color:var(--muted)}
-.notice{border-left:0;background:var(--s-wait-bg);color:var(--s-wait);padding:10px 12px;font-size:14px;font-weight:600}
-.verify{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
-.verify label{flex:1 1 180px}
-.err{color:var(--danger);font-size:14px;font-weight:600;margin:0}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#f4c430;color:#111;padding:12px 18px;border-radius:10px;font-weight:700;z-index:50;max-width:90vw;box-shadow:0 4px 16px rgba(0,0,0,.4)}
-.toast.bad{background:#e5534b;color:#fff}
-.alerts{margin:0;padding-left:18px;color:var(--muted);font-size:14px}
-@media (max-width:640px){form{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.steps li{font-size:11px}}
-@media (prefers-reduced-motion:no-preference){.card{transition:border-color .2s}}
-</style>
-<style>
-[hidden]{display:none!important}body{margin:0}img{max-width:100%}
-.who{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
-.whoName{font-size:14px;color:var(--muted)}.whoName b{color:var(--ink)}
-.link{font:600 14px var(--f-body);background:none;border:0;padding:6px 2px;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer;min-height:32px}
-.link.mono{font-family:var(--f-mono);font-size:13px;font-weight:500}
-.ok{color:var(--s-ready);font-size:14px;font-weight:600;margin:0}
-.btn.sm{padding:6px 10px;min-height:36px;font-size:13px}
-a.btn{display:inline-flex;align-items:center;text-decoration:none}
-.dmg{margin:0;padding:10px 12px;font-size:14px;display:flex;flex-direction:column;gap:4px}
-.dmg.ok{background:var(--s-ready-bg);color:var(--s-ready);font-weight:600}
-.dmg.found{background:var(--s-wait-bg);color:var(--ink);border-left:4px solid var(--s-wait)}
-.dmgflag{color:var(--s-wait)}
-.dmgcheck{display:flex;flex-direction:column;gap:10px;border:1px dashed var(--line);padding:12px}
-.ph{display:flex;align-items:center;justify-content:center;width:120px;height:90px;border:1px solid var(--line);font-size:12px}
-.stars{color:#C98A00;letter-spacing:2px}
+.photos img{width:132px;height:99px;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+.ph{display:flex;align-items:center;justify-content:center;width:132px;height:99px;border-radius:10px;border:1px dashed var(--line-2);font-size:12px}
+.dmg{padding:12px 14px;border-radius:var(--r-sm);font-size:14px;display:flex;flex-direction:column;gap:4px}
+.dmg.ok{background:var(--ready-bg);color:var(--ready);font-weight:600}
+.dmg.found{background:var(--wait-bg);color:var(--ink);border-left:4px solid var(--wait)}
+.dmgflag{color:var(--wait)}
+.alerts{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--muted)}
+.alerts li{display:flex;gap:10px}.alerts time{flex:none;font-weight:600;color:var(--ink);min-width:62px}
+details>summary{cursor:pointer}
+.upd summary{font-weight:600;font-size:14px;color:var(--muted);list-style:none}
+.upd summary::-webkit-details-marker{display:none}
+.upd summary::after{content:' ▾'}.upd[open] summary::after{content:' ▴'}
+
+/* Customer: booking */
+.bookhead{display:flex;flex-direction:column;gap:6px}
+.zoneinfo{align-self:flex-start;font-weight:700;font-size:14px;background:var(--work-bg);color:var(--work);padding:6px 12px;border-radius:999px}
+#bookForm{display:flex;flex-direction:column;gap:16px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.svcs{border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:10px;min-width:0}
+.svcs legend{font-weight:700;font-size:15px;padding:0;margin-bottom:10px}
+.svchead{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.svcgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.svc{position:relative;flex-direction:column;align-items:flex-start;gap:2px;font-weight:600;border:1.5px solid var(--line-2);border-radius:var(--r-sm);padding:14px 14px 12px;min-height:96px;cursor:pointer;background:var(--surface-2);transition:border-color .15s,background .15s}
+.svc input{position:absolute;opacity:0;pointer-events:none}
+.svc span{font-size:15px;line-height:1.25;padding-right:22px}
+.svc small{font-weight:500;color:var(--muted);font-size:12.5px;line-height:1.3}
+.svc b{margin-top:auto;padding-top:6px;font-size:16px;font-weight:800}
+.svc::after{content:'';position:absolute;top:12px;right:12px;width:20px;height:20px;border-radius:6px;border:1.5px solid var(--line-2);background:var(--surface)}
+.svc:has(input:checked){border-color:var(--ink);background:var(--accent-soft)}
+.svc:has(input:checked)::after{background:var(--ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 10.5l3 3 7-7' fill='none' stroke='%23F2C230' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/16px no-repeat;border-color:var(--ink)}
+.svc:has(input:focus-visible){outline:3px solid var(--accent);outline-offset:2px}
+.svcgrid.addons .svc{min-height:0;flex-direction:row;align-items:center;justify-content:space-between;padding:12px 44px 12px 14px}
+.svcgrid.addons .svc b{margin:0;padding:0;font-size:15px}
+.svcgrid.addons .svc::after{top:50%;transform:translateY(-50%)}
+.paybar{position:sticky;bottom:0;margin:4px -18px -18px;padding:12px 18px calc(12px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);border-radius:0 0 var(--r) var(--r);display:flex;align-items:center;justify-content:space-between;gap:12px;z-index:5}
+.paybar small{display:block;color:var(--muted);font-size:13px;font-weight:600}
+.paybar b{font-size:26px;font-weight:800;letter-spacing:-.01em}
+.paybar .btn{min-width:150px}
+.foot{text-align:center}
+.collapsed #bookForm,.collapsed .bookintro{display:none}
+#bookAnother{align-self:flex-start}
+
+/* Customer: ticket */
+.ticket{gap:14px;padding:0;overflow:hidden}
+.ticket>.tbody{padding:0 18px 18px;display:flex;flex-direction:column;gap:14px}
+.hero{padding:20px 18px;display:flex;gap:14px;align-items:flex-start}
+.hero .ico{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;flex:none;font-size:22px;font-weight:800}
+.hero h2{font-size:21px}
+.hero p{margin-top:4px;font-size:14.5px}
+.hero.booked{background:var(--wait-bg)}.hero.booked .ico{background:var(--wait);color:var(--wait-bg)}
+.hero.verified,.hero.washing{background:var(--work-bg)}.hero.verified .ico,.hero.washing .ico{background:var(--work);color:var(--work-bg)}
+.hero.ready{background:var(--ready-bg)}.hero.ready .ico{background:var(--ready);color:var(--ready-bg)}
+.hero.closed{background:var(--done-bg)}.hero.closed .ico{background:var(--done);color:var(--done-bg)}
+.hero.cancelled,.hero.noshow{background:var(--bad-bg)}.hero.cancelled .ico,.hero.noshow .ico{background:var(--bad);color:var(--bad-bg)}
+.tline{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.tline .code{color:var(--muted);font-size:13.5px;font-weight:600}
+.pay{display:flex;flex-direction:column;gap:8px}
+.pay .amount{font-size:30px;font-weight:800}
+.starpick{display:flex;gap:6px}
+.star{font-size:34px;line-height:1;width:52px;height:52px;border:0;border-radius:12px;background:var(--surface-2);color:var(--line-2);cursor:pointer}
+.star[aria-pressed="true"]{color:#E0A100;background:var(--accent-soft)}
+.stars{color:#E0A100;letter-spacing:2px}
 .rated{margin:0}
-.starpick{display:flex;gap:4px}
-.star{font-size:30px;line-height:1;width:44px;height:44px;border:0;background:none;color:var(--line);cursor:pointer}
-.star[aria-pressed="true"]{color:#C98A00}
-.seg{display:flex;border:2px solid var(--ink)}
-.seg button{font:600 14px var(--f-body);background:transparent;color:var(--ink);border:0;padding:8px 12px;min-height:40px;cursor:pointer}
-.seg button+button{border-left:2px solid var(--ink)}
-.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
-.dstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-.dstats .stat{display:flex;flex-direction:column;gap:2px}
-.dstats .stat b{font-size:26px}
-.dstats .stat small{color:var(--muted);font-size:12px}
-.chartbox svg{width:100%;height:auto;display:block}
-.chartbox .bar{fill:var(--s-work)}
-.chartbox .hit{fill:transparent}
-.chartbox .hit:hover{fill:var(--line);opacity:.35}
-.chartbox .grid{stroke:var(--line);stroke-width:1}
-.chartbox .base{stroke:var(--muted);stroke-width:1}
-.chartbox .ax{fill:var(--muted);font:20px var(--f-body)}
-.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-table.small{min-width:0;font-size:14px}
-td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.comments{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:8px;font-size:14px}
-@media (max-width:640px){.dstats{grid-template-columns:repeat(2,minmax(0,1fr))}.grid2{grid-template-columns:1fr}}
-.svcs{border:1px solid var(--line);padding:12px 14px;margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
-.svcs legend{font-weight:600;font-size:14px;padding:0 4px}
-.svchead{margin:4px 0 0;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.svcgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.svc{flex-direction:row;align-items:center;gap:10px;font-weight:500;border:1px solid var(--line);padding:10px;min-height:48px;cursor:pointer;background:var(--bg)}
-.svc:has(input:checked){border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
-.svc input{width:20px;height:20px;min-height:0;flex:none;margin:0}
-.svc span{flex:1;min-width:0}
-.svc b{font-variant-numeric:tabular-nums;white-space:nowrap}
-.total{margin:4px 0 0;display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid var(--ink);padding-top:8px;font-weight:600}
-.total b{font-family:var(--f-display);font-weight:400;font-size:24px}
-@media (max-width:640px){.svcgrid{grid-template-columns:1fr}}
-.logcards{display:none;flex-direction:column;gap:10px}
-.logcard{background:var(--surface);border:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:8px}
-.times{margin:0;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
-.times b{color:var(--ink);font-weight:600}
-.clearbox{border-top:1px solid var(--line);padding-top:12px}
-.clearq{font-weight:600;color:var(--danger);flex:1 1 100%}
-@media (max-width:760px){.logcards{display:flex}.logtable{display:none}}
-.zoneinfo{margin:0;font-weight:700;background:var(--s-work-bg);color:var(--s-work);padding:8px 12px}
-.st-noshow{color:var(--s-done);background:var(--s-done-bg)}
-.noshow summary{list-style:none;cursor:pointer;width:fit-content}
-.noshow summary::-webkit-details-marker{display:none}
-.noshowbox{display:flex;flex-direction:column;gap:8px;padding-top:8px}
-.loyal{margin:0;font-size:14px;background:var(--s-ready-bg);color:var(--s-ready);padding:8px 12px}
-.walkup summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
-.walkup[open] summary{margin-bottom:12px}
-.donelist summary{cursor:pointer}
-.donerow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
-.plate.sm{font-size:14px}
-.rcwrap summary{list-style:none;cursor:pointer;width:fit-content}
+.rcwrap summary{list-style:none;width:fit-content}
 .rcwrap summary::-webkit-details-marker{display:none}
 .rcwrap[open] summary{margin-bottom:10px}
-.receipt,.rep{border:1px dashed var(--muted);padding:14px;display:flex;flex-direction:column;gap:6px;background:var(--bg);max-width:460px}
-.rep{max-width:640px}
-.rc-brand{margin:0;font-family:var(--f-display);font-size:20px;text-transform:uppercase}
+.receipt,.rep{border:1px dashed var(--line-2);border-radius:var(--r-sm);padding:16px;display:flex;flex-direction:column;gap:6px;background:var(--surface-2);max-width:480px}
+.rep{max-width:680px}
+.rc-brand{margin:0;font-size:20px;font-weight:800}
 table.rc{min-width:0;width:100%;font-size:14px;border-collapse:collapse}
-table.rc td{padding:6px 0;border-bottom:1px dotted var(--line)}
-.rc-total td{font-weight:700;border-top:2px solid var(--ink);border-bottom:0}
+table.rc td{padding:7px 0;border-bottom:1px dotted var(--line-2)}
+.rc-total td{font-weight:800;border-top:2px solid var(--ink);border-bottom:0}
+td.num,th.num{text-align:right;white-space:nowrap}
+
+/* Sign in */
+.signin{max-width:440px;width:100%;margin:12px auto 0}
+.signin form{display:flex;flex-direction:column;gap:14px}
+
+/* Attendant */
+.shiftbar{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px 12px 16px;box-shadow:var(--shadow)}
+.shiftbar .st{display:flex;align-items:center;gap:10px;min-width:0}
+.shiftbar .sdot{width:12px;height:12px;border-radius:50%;background:var(--line-2);flex:none}
+.shiftbar.on .sdot{background:#2FA35A;box-shadow:0 0 0 4px rgba(47,163,90,.18)}
+.shiftbar b{display:block;font-size:15.5px}
+.shiftbar small{display:block;color:var(--muted);font-size:13px}
+.shiftbar .acts{display:flex;align-items:center;gap:6px;flex:none}
+.iconbtn{width:44px;height:44px;border-radius:12px;border:1.5px solid var(--line-2);background:var(--surface);color:var(--ink);display:grid;place-items:center;cursor:pointer;font-size:18px}
+.iconbtn[aria-pressed="false"]{color:var(--muted)}
+.howto{padding:14px 16px}
+.howto summary{font-weight:700;font-size:15px}
+.howto ol{margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:4px;font-size:14.5px;color:var(--muted)}
+.qhead{display:flex;align-items:baseline;justify-content:space-between;margin:6px 2px -4px}
+.qhead h3{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.qhead span{font-size:13px;color:var(--muted);font-weight:600}
+.joblist{display:flex;flex-direction:column;gap:10px}
+.job{background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--line-2);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+.job.s-booked{border-left-color:var(--wait)}.job.s-verified,.job.s-washing{border-left-color:var(--work)}.job.s-ready{border-left-color:var(--ready)}
+.job.other{opacity:.62;box-shadow:none}
+.jobhead{all:unset;box-sizing:border-box;width:100%;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"plate chip" "where age" "svc svc";gap:6px 12px;align-items:center;padding:14px 14px 14px 12px}
+.jobhead:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
+.jobhead .plate{grid-area:plate;justify-self:start}
+.jobhead .where{grid-area:where;font-weight:700;font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jobhead .svcl{grid-area:svc;font-size:13px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jobhead .chip{grid-area:chip;justify-self:end}
+.jobhead .age{grid-area:age;justify-self:end;font-size:12.5px;color:var(--muted);font-weight:600;white-space:nowrap}
+.job.open .jobhead{border-bottom:1px solid var(--line)}
+.jobbody{padding:16px;display:flex;flex-direction:column;gap:14px}
+.nowbox{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:16px;display:flex;flex-direction:column;gap:12px}
+.stepno{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.nowbox h3{font-size:19px}
+.jobfoot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding-top:10px}
+.loyal{font-size:14px;background:var(--ready-bg);color:var(--ready);padding:10px 12px;border-radius:var(--r-sm)}
+.waitpay{font-weight:600;color:var(--ready);background:var(--ready-bg);padding:12px 14px;font-size:14.5px;border-radius:var(--r-sm)}
+.lockmsg{font-weight:600;color:var(--muted);background:var(--done-bg);padding:12px 14px;font-size:14.5px;border-radius:var(--r-sm)}
+.noshow summary{list-style:none;width:fit-content}
+.noshow summary::-webkit-details-marker{display:none}
+.noshowbox{display:flex;flex-direction:column;gap:10px;padding-top:6px}
+.donelist{padding:14px 16px}
+.donelist summary{font-weight:700}
+.donerow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 0;border-top:1px solid var(--line);font-size:14px}
+.donerow:first-of-type{margin-top:10px}
+.fab{position:fixed;right:16px;bottom:calc(20px + env(safe-area-inset-bottom));z-index:30;font:800 16px var(--f);background:var(--ink);color:var(--surface);border:0;border-radius:999px;padding:0 22px;min-height:56px;box-shadow:0 8px 24px rgba(0,0,0,.28);cursor:pointer}
+dialog.sheet{border:0;padding:0;margin:auto auto 0;width:100%;max-width:640px;max-height:92vh;border-radius:20px 20px 0 0;background:var(--surface);color:var(--ink);box-shadow:0 -10px 40px rgba(0,0,0,.3)}
+dialog.sheet::backdrop{background:rgba(8,16,13,.55)}
+.sheethead{position:sticky;top:0;background:var(--surface);display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line);z-index:2}
+#walkForm{display:flex;flex-direction:column;gap:14px;padding:16px 18px calc(18px + env(safe-area-inset-bottom))}
+#w-services .svcgrid{grid-template-columns:1fr}
+#w-services .svc{min-height:0;flex-direction:row;align-items:center;justify-content:space-between;padding:12px 44px 12px 14px}
+#w-services .svc b{margin:0;padding:0;font-size:15px}
+#w-services .svc::after{top:50%;transform:translateY(-50%)}
+.handover{background:var(--accent-soft);border-radius:var(--r-sm);padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.total{display:flex;justify-content:space-between;align-items:baseline;font-weight:700;padding-top:4px}
+.total b{font-size:22px;font-weight:800}
+
+/* Security, dashboard, staff */
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:2px;box-shadow:var(--shadow);min-width:0}
+.stat span{font-size:13px;color:var(--muted);font-weight:600}
+.stat b{font-size:28px;font-weight:800;line-height:1.15;letter-spacing:-.01em}
+.stat small{color:var(--muted);font-size:12.5px}
+.sechead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.sec{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+.sec>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;font-weight:700;font-size:16px;min-height:56px}
+.sec>summary::-webkit-details-marker{display:none}
+.sec>summary .meta{font-weight:600;font-size:13.5px;color:var(--muted);margin-left:auto}
+.sec>summary::after{content:'';width:10px;height:10px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin:-4px 4px 0 0;transition:transform .2s;flex:none}
+.sec[open]>summary::after{transform:rotate(-135deg);margin-top:4px}
+.sec>.secbody{padding:0 18px 18px;display:flex;flex-direction:column;gap:14px}
+.mini{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.mini .stat{box-shadow:none;background:var(--surface-2)}
+.mini .stat b{font-size:22px}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+table.small{min-width:0}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);font-weight:700}
+td.t{font-size:13px;white-space:nowrap}
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:3px}
+.seg button{font:600 14px var(--f);background:transparent;color:var(--muted);border:0;border-radius:999px;padding:8px 14px;min-height:38px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
 label.inline{flex-direction:row;align-items:center;gap:8px}
-label.inline select{width:auto;min-height:40px}
-.qrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:12px}
-.qrcard{margin:0;border:1px solid var(--line);padding:10px;background:#fff;color:#10231C;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
-.qrcard svg{width:150px;height:150px}
+label.inline select{width:auto;min-height:42px;padding:8px 10px}
+.chartbox svg{width:100%;height:auto;display:block}
+.chartbox .bar{fill:var(--work)}
+.chartbox .hit{fill:transparent}
+.chartbox .hit:hover{fill:var(--line);opacity:.5}
+.chartbox .grid{stroke:var(--line);stroke-width:1}
+.chartbox .base{stroke:var(--muted);stroke-width:1}
+.chartbox .ax{fill:var(--muted);font:20px var(--f)}
+.comments{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px;font-size:14.5px}
+.logcards{display:none;flex-direction:column;gap:10px}
+.logcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--shadow)}
+.times{font-size:13px;color:var(--muted)}
+.times b{color:var(--ink);font-weight:600}
+.clearbox{padding-top:4px}
+.clearq{font-weight:600;color:var(--bad);flex:1 1 100%}
+@media (max-width:760px){.logcards{display:flex}.logtable{display:none}}
+.staffcard{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 14px}
+.staffcard .nm{display:flex;flex-direction:column;min-width:0}
+.staffcard .nm small{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.staffcard select{width:auto;min-height:42px;padding:8px 10px}
+.qrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.qrcard{margin:0;border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;background:#fff;color:#10231C;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.qrcard svg{width:140px;height:140px}
 .qrcard figcaption{display:flex;flex-direction:column;gap:2px;font-size:13px}
 .qrcard a{color:#0B5A8A;font-size:12px}
-#qrSheet h4{margin:8px 0}
+@media (max-width:640px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mini{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .svcgrid{grid-template-columns:1fr 1fr}
+  .svcgrid.addons{grid-template-columns:1fr}
+  .steps li{font-size:11px}
+}
+@media (max-width:360px){.two{grid-template-columns:1fr}.svcgrid{grid-template-columns:1fr}}
+
+/* Motion */
+@media (prefers-reduced-motion:no-preference){
+  .panel:not([hidden]){animation:fade .2s ease-out}
+  .bump{animation:bump 1.2s ease-out}
+  dialog.sheet[open]{animation:up .22s ease-out}
+  .toast:not([hidden]){animation:fade .18s ease-out}
+}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes bump{0%{box-shadow:0 0 0 0 rgba(242,194,48,.9)}100%{box-shadow:0 0 0 14px rgba(242,194,48,0)}}
+
 @media print{
   body.printing *{visibility:hidden}
   body.printing[data-print="report"] #report, body.printing[data-print="report"] #report *,
@@ -200,89 +341,94 @@ label.inline select{width:auto;min-height:40px}
   body.printing #report, body.printing #qrSheet{position:absolute;left:0;top:0;width:100%}
   body.printing .noprint, body.printing .qrcard a{display:none}
   body{background:#fff;color:#000}
+  .appbar,.fab{display:none}
 }
-.waitpay{margin:0;font-weight:600;color:var(--s-ready);background:var(--s-ready-bg);padding:10px 12px;font-size:14px}
-.pay{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:12px}
-.btn.wa{border-color:#1E6B3A;color:var(--s-ready)}
-@media (max-width:640px){.who{align-items:flex-start}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div>
-      <h1>Parking Wash Tracker</h1>
-      <p class="sub">Booking, consent and job tracking for on-site car washing · Forum Mall pilot</p>
+<header class="appbar">
+  <div class="appbar-in">
+    <div class="brandrow">
+      <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.5c-.3 0-.6.2-.8.4C9.3 5.4 5.5 10.5 5.5 14.5a6.5 6.5 0 0 0 13 0c0-4-3.8-9.1-5.7-11.6-.2-.2-.5-.4-.8-.4z" fill="#10231C"/></svg></span>
+      <div class="brandtxt"><b id="brandName">Parking Wash</b><small id="brandSite"></small></div>
     </div>
     <div class="who">
-      <button class="link" id="installBtn" type="button" hidden>Install app on this phone</button>
-      <div class="live" id="live"><span class="dot" id="liveDot"></span><span id="liveText">Connecting…</span></div>
-      <div class="row" id="whoBox" hidden>
-        <span class="whoName"><b id="whoName"></b> · <span id="whoRole"></span></span>
+      <button class="link" id="installBtn" type="button" hidden>Install app</button>
+      <div class="live" id="live" title="Live updates"><span class="dot" id="liveDot"></span><span id="liveText">Connecting…</span></div>
+      <div class="row" id="whoBox" hidden style="gap:8px">
+        <span class="whoName"><b id="whoName"></b><small id="whoRole"></small></span>
         <button class="link" id="signOutBtn">Sign out</button>
       </div>
     </div>
-  </header>
-
-  <nav role="tablist" aria-label="View as">
-    <button role="tab" id="tab-customer" aria-controls="v-customer" aria-selected="true">Customer</button>
-    <button role="tab" id="tab-attendant" aria-controls="v-attendant" aria-selected="false">Attendant</button>
-    <button role="tab" id="tab-security" aria-controls="v-security" aria-selected="false">Mall security</button>
-    <button role="tab" id="tab-staff" aria-controls="v-staff" aria-selected="false" hidden>Staff</button>
+  </div>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Views" hidden>
+    <button role="tab" id="tab-attendant" aria-controls="v-attendant" aria-selected="false">Jobs</button>
+    <button role="tab" id="tab-security" aria-controls="v-security" aria-selected="false">Security log</button>
     <button role="tab" id="tab-dash" aria-controls="v-dash" aria-selected="false" hidden>Dashboard</button>
+    <button role="tab" id="tab-staff" aria-controls="v-staff" aria-selected="false" hidden>Staff</button>
+    <button role="tab" id="tab-customer" aria-controls="v-customer" aria-selected="true" hidden>Booking page</button>
   </nav>
+</header>
 
+<main class="wrap">
   <p class="notice" id="offline" hidden>Can’t reach the database. Check your connection and reload.</p>
 
   <!-- CUSTOMER -->
   <section class="panel" id="v-customer" role="tabpanel" aria-labelledby="tab-customer">
-    <div class="card">
-      <h2>Book a wash for your parked car</h2>
-      <p class="hint">Scan the QR code at the parking entrance to open this page. Nothing is done to your car until you book and agree below.</p>
-      <p class="zoneinfo" id="zoneInfo" hidden></p>
+    <div class="panel" id="myTickets"></div>
+    <div class="card" id="bookCard">
+      <div class="bookhead">
+        <h2 id="bookTitle">Book a wash for your parked car</h2>
+        <p class="hint bookintro">Shop while we clean. Nothing is done to your car until you book and agree below.</p>
+        <p class="zoneinfo bookintro" id="zoneInfo" hidden></p>
+      </div>
+      <button class="btn alt" id="bookAnother" type="button" hidden>Book another car</button>
       <form id="bookForm" novalidate>
-        <label>Car number
-          <input id="f-plate" name="plate" autocomplete="off" placeholder="KA 19 MN 4821" required>
-        </label>
-        <label>Parking bay
-          <input id="f-bay" name="bay" autocomplete="off" placeholder="B2 – 47" required>
-        </label>
-        <fieldset class="full svcs" id="f-services">
-          <legend>Choose your services</legend>
-          <p class="svchead">Wash</p>
+        <div class="two">
+          <label>Car number
+            <input id="f-plate" name="plate" autocomplete="off" autocapitalize="characters" placeholder="KA 19 MN 4821" required>
+          </label>
+          <label>Parking bay
+            <input id="f-bay" name="bay" autocomplete="off" placeholder="47" required>
+          </label>
+        </div>
+        <fieldset class="svcs" id="f-services">
+          <legend>Choose your wash</legend>
           <div class="svcgrid">
-            <label class="svc"><input type="checkbox" value="Exterior eco wash" checked><span>Exterior eco wash</span><b data-price></b></label>
-            <label class="svc"><input type="checkbox" value="Interior cleaning"><span>Interior cleaning</span><b data-price></b></label>
-            <label class="svc"><input type="checkbox" value="Full wash, inside and out"><span>Full wash, inside and out</span><b data-price></b></label>
-            <label class="svc"><input type="checkbox" value="Steam interior cleaning"><span>Steam interior cleaning</span><b data-price></b></label>
+            <label class="svc"><input type="checkbox" value="Exterior eco wash" checked><span>Exterior eco wash</span><small>Outside only · no keys needed</small><b data-price></b></label>
+            <label class="svc"><input type="checkbox" value="Interior cleaning"><span>Interior cleaning</span><small>Vacuum and wipe-down inside</small><b data-price></b></label>
+            <label class="svc"><input type="checkbox" value="Full wash, inside and out"><span>Full wash</span><small>Inside and out</small><b data-price></b></label>
+            <label class="svc"><input type="checkbox" value="Steam interior cleaning"><span>Steam interior</span><small>Deep clean of seats and mats</small><b data-price></b></label>
           </div>
           <p class="svchead">Add-ons</p>
-          <div class="svcgrid">
+          <div class="svcgrid addons">
             <label class="svc"><input type="checkbox" value="Tyre pressure check"><span>Tyre pressure check</span><b data-price></b></label>
             <label class="svc"><input type="checkbox" value="Battery check"><span>Battery check</span><b data-price></b></label>
           </div>
-          <p class="total">Total <b id="f-total">₹0</b></p>
         </fieldset>
-        <label>WhatsApp number for alerts
+        <label>WhatsApp number for updates
           <input id="f-phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="98450 12345" required>
         </label>
-        <label class="check full"><input type="checkbox" id="f-consent" required>
-          <span>I am the owner or driver of this car and I authorise the attendant to clean it in this bay. Before and after photos will be taken. Exterior washes need no keys.</span>
+        <label class="check"><input type="checkbox" id="f-consent" required>
+          <span>I am the owner or driver of this car and I authorise the attendant to clean it in this bay. Before and after photos will be taken.</span>
         </label>
-        <p class="err full" id="bookErr" hidden></p>
-        <div class="full row"><button class="btn go" type="submit" id="bookBtn">Book wash</button></div>
+        <p class="err" id="bookErr" hidden></p>
+        <div class="paybar">
+          <div><small>Total</small><b id="f-total">₹0</b></div>
+          <button class="btn go" type="submit" id="bookBtn">Book wash</button>
+        </div>
       </form>
     </div>
-    <div class="panel" id="myTickets"></div>
+    <p class="foot" id="staffFoot"><button class="link" id="staffLink" type="button">Staff sign in</button></p>
   </section>
 
-  <!-- SIGN IN (shown for staff tabs when not signed in or not allowed) -->
+  <!-- SIGN IN -->
   <section class="panel" id="v-signin" hidden>
-    <div class="card" id="signinCard">
+    <div class="card signin" id="signinCard">
       <h2 id="signinTitle">Staff sign in</h2>
-      <p class="hint" id="signinHint">Attendants and mall security sign in to see jobs. Customers don’t need an account.</p>
+      <p class="hint" id="signinHint">For attendants, mall security and the owner. Customers don’t need an account.</p>
       <form id="authForm" novalidate>
-        <label class="full" id="nameWrap" hidden>Your name
+        <label id="nameWrap" hidden>Your name
           <input id="a-name" autocomplete="name" placeholder="Name shown on tickets">
         </label>
         <label>Email
@@ -291,114 +437,157 @@ label.inline select{width:auto;min-height:40px}
         <label>Password
           <input id="a-pass" type="password" autocomplete="current-password" minlength="6" required>
         </label>
-        <p class="err full" id="authErr" hidden></p>
-        <p class="ok full" id="authOk" hidden></p>
-        <div class="full row">
-          <button class="btn go" type="submit" id="authBtn">Sign in</button>
+        <p class="err" id="authErr" hidden></p>
+        <p class="ok" id="authOk" hidden></p>
+        <button class="btn go big" type="submit" id="authBtn">Sign in</button>
+        <div class="row between">
           <button class="link" type="button" id="modeBtn">New staff member? Create an account</button>
           <button class="link" type="button" id="resetBtn">Forgot password</button>
         </div>
       </form>
     </div>
-    <div class="card" id="pendingCard" hidden>
+    <div class="card signin" id="pendingCard" hidden>
       <h2>Waiting for approval</h2>
-      <p class="hint">Your account is set up. The owner needs to give you access as an attendant or mall security. Ask them to open the Staff tab, then reload this page.</p>
+      <p class="hint">Your account is set up. Ask the owner to give you access on the Staff tab, then reload this page.</p>
     </div>
-    <div class="card" id="noAccessCard" hidden>
+    <div class="card signin" id="noAccessCard" hidden>
       <h2>This view isn’t part of your role</h2>
       <p class="hint" id="noAccessText"></p>
     </div>
+    <p class="foot"><button class="link" id="backBook" type="button">Back to booking</button></p>
   </section>
 
   <!-- ATTENDANT -->
   <section class="panel" id="v-attendant" role="tabpanel" aria-labelledby="tab-attendant" hidden>
-    <div class="card">
-      <p class="hint"><b>Rules:</b> work only on booked tickets. Re-type the number plate to verify the car, then check for existing damage. The damage check and a before-photo are required to start, and an after-photo to finish.</p>
-    </div>
-    <div class="card" id="shiftCard"></div>
-    <details class="card walkup" id="walkup">
-      <summary><b>+ Walk-up booking</b> <span class="hint">For customers who don’t scan the QR code</span></summary>
-      <form id="walkForm" novalidate>
-        <label>Car number<input id="w-plate" autocomplete="off" placeholder="KA 19 MN 4821"></label>
-        <label>Zone<select id="w-zone"></select></label>
-        <label>Bay<input id="w-bay" autocomplete="off" placeholder="47"></label>
-        <label>Customer WhatsApp (optional)<input id="w-phone" inputmode="tel" autocomplete="off" placeholder="98450 12345"></label>
-        <fieldset class="full svcs" id="w-services"></fieldset>
-        <p class="hint full"><b>Hand the phone to the customer</b> to read and tick this box.</p>
-        <label class="check full"><input type="checkbox" id="w-consent"><span>I am the owner or driver of this car and I authorise the attendant to clean it in this bay. Before and after photos will be taken.</span></label>
-        <p class="err full" id="walkErr" hidden></p>
-        <div class="full row"><button class="btn go" type="submit">Create booking</button></div>
-      </form>
+    <div class="shiftbar" id="shiftCard"></div>
+    <details class="card howto" id="howto">
+      <summary>How a job works</summary>
+      <ol>
+        <li>Find the car and type the number plate to verify it.</li>
+        <li>Walk around the car and record any damage that’s already there.</li>
+        <li>Take the before-photo, then start the wash.</li>
+        <li>Take the after-photo and mark the wash complete.</li>
+        <li>The customer pays on their phone. Cash is the fallback.</li>
+      </ol>
+      <p class="hint" style="margin-top:8px">Work only on booked cars. A job belongs to whoever verified it.</p>
     </details>
     <div class="panel" id="queue"></div>
+    <button class="fab" id="walkFab" type="button">+ Walk-up</button>
   </section>
 
   <!-- SECURITY -->
   <section class="panel" id="v-security" role="tabpanel" aria-labelledby="tab-security" hidden>
-    <div class="stats" id="stats"></div>
-    <div class="row" style="justify-content:space-between">
-      <h2>Today's job log</h2>
-      <div class="row"><button class="btn alt" id="exBtn" hidden>Add example tickets</button><button class="btn alt" id="dlBtn">Download today's log (CSV)</button></div>
+    <div class="kpis" id="stats"></div>
+    <div class="sechead">
+      <h2>Today’s job log</h2>
+      <button class="btn alt sm" id="dlBtn">Download CSV</button>
     </div>
     <div class="logcards" id="logCards"></div>
     <div class="tablebox logtable"><table>
       <thead><tr><th>Ticket</th><th>Car</th><th>Bay</th><th>Service</th><th>Status</th><th>Attendant</th><th>Photos</th><th>Damage</th><th>Rating</th><th>Booked</th><th>Verified</th><th>Started</th><th>Done</th><th>Paid</th></tr></thead>
       <tbody id="logBody"></tbody>
     </table></div>
-    <p class="hint">Tap a ticket number to see its photos and history. Phone numbers are masked.</p>
-    <div class="row clearbox" id="clearBox" hidden></div>
+    <p class="hint">Tap a ticket number for its photos and history. Phone numbers are masked.</p>
     <div class="panel" id="detail"></div>
+    <details class="sec" id="toolsBox" hidden>
+      <summary>Testing tools</summary>
+      <div class="secbody">
+        <p class="hint">Example tickets are marked “Example” and left out of the dashboard.</p>
+        <div class="row"><button class="btn alt sm" id="exBtn">Add example tickets</button></div>
+        <div class="row clearbox" id="clearBox"></div>
+      </div>
+    </details>
   </section>
 
   <!-- STAFF (owner only) -->
   <section class="panel" id="v-staff" role="tabpanel" aria-labelledby="tab-staff" hidden>
-    <div class="card">
-      <h2>Staff access</h2>
-      <p class="hint">New staff create an account on the Attendant or Mall security tab. Give each person the role they need here. Removing access signs them out of all staff views.</p>
-    </div>
-    <div class="tablebox"><table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Site</th><th>Change role</th></tr></thead>
-      <tbody id="staffBody"></tbody>
-    </table></div>
+    <div class="sechead"><h2>Staff access</h2></div>
+    <p class="hint">New staff create an account from “Staff sign in” on the booking page. Give each person a role here.</p>
+    <div class="panel" id="staffBody"></div>
   </section>
+
   <!-- DASHBOARD (owner only) -->
   <section class="panel" id="v-dash" role="tabpanel" aria-labelledby="tab-dash" hidden>
-    <div class="row" style="justify-content:space-between">
-      <h2>Business dashboard</h2>
-      <label class="inline" hidden>Site <select id="dashSite"></select></label>
-      <div class="seg" role="group" aria-label="Date range">
-        <button type="button" data-range="1" aria-pressed="false">Today</button>
-        <button type="button" data-range="7" aria-pressed="true">7 days</button>
-        <button type="button" data-range="30" aria-pressed="false">30 days</button>
+    <div class="sechead">
+      <h2>Dashboard</h2>
+      <div class="row">
+        <label class="inline" hidden><span class="hint">Site</span><select id="dashSite"></select></label>
+        <div class="seg" role="group" aria-label="Date range">
+          <button type="button" data-range="1" aria-pressed="false">Today</button>
+          <button type="button" data-range="7" aria-pressed="true">7 days</button>
+          <button type="button" data-range="30" aria-pressed="false">30 days</button>
+        </div>
       </div>
     </div>
-    <div class="dstats" id="dashStats"></div>
-    <div class="card"><h3>Team today</h3><div class="tablebox"><table class="small">
-      <thead><tr><th>Name</th><th>Status</th><th class="num">Shift start</th><th class="num">Hours</th><th class="num">Washes today</th></tr></thead>
-      <tbody id="teamBody"></tbody></table></div></div>
-    <div class="card"><h3>Revenue per day</h3><div class="chartbox" id="revChart"></div></div>
-    <div class="card"><h3>Bookings by hour</h3><div class="chartbox" id="hourChart"></div></div>
-    <div class="grid2">
-      <div class="card"><h3>Attendants</h3><div class="tablebox"><table class="small">
-        <thead><tr><th>Name</th><th class="num">Washes</th><th class="num">Avg time</th><th class="num">Rating</th><th class="num">Damage noted</th></tr></thead>
-        <tbody id="attBody"></tbody></table></div></div>
-      <div class="card"><h3>Services</h3><div class="tablebox"><table class="small">
+    <div class="kpis" id="dashStats"></div>
+
+    <details class="sec" open><summary>Team today <span class="meta" id="teamMeta"></span></summary><div class="secbody">
+      <div class="tablebox"><table class="small">
+        <thead><tr><th>Name</th><th>Status</th><th class="num">Start</th><th class="num">Hours</th><th class="num">Washes</th></tr></thead>
+        <tbody id="teamBody"></tbody></table></div>
+    </div></details>
+
+    <details class="sec" open><summary>Revenue <span class="meta" id="revMeta"></span></summary><div class="secbody">
+      <div class="chartbox" id="revChart"></div>
+      <div class="tablebox"><table class="small">
         <thead><tr><th>Service</th><th class="num">Washes</th><th class="num">Revenue</th></tr></thead>
-        <tbody id="svcBody"></tbody></table></div></div>
-    </div>
-    <div class="card"><h3>Latest customer comments</h3><ul class="comments" id="comments"></ul></div>
-    <div class="card" id="reportCard"><h3>Monthly report for the venue</h3>
+        <tbody id="svcBody"></tbody></table></div>
+    </div></details>
+
+    <details class="sec"><summary>Bookings and service <span class="meta" id="bookMeta"></span></summary><div class="secbody">
+      <div class="mini" id="dashMore"></div>
+      <h4>Bookings by hour</h4>
+      <div class="chartbox" id="hourChart"></div>
+    </div></details>
+
+    <details class="sec"><summary>Attendants</summary><div class="secbody">
+      <div class="tablebox"><table class="small">
+        <thead><tr><th>Name</th><th class="num">Washes</th><th class="num">Avg time</th><th class="num">Rating</th><th class="num">Damage</th></tr></thead>
+        <tbody id="attBody"></tbody></table></div>
+    </div></details>
+
+    <details class="sec"><summary>Customer comments <span class="meta" id="cmMeta"></span></summary><div class="secbody">
+      <ul class="comments" id="comments"></ul>
+    </div></details>
+
+    <details class="sec" id="reportCard"><summary>Monthly report for the venue</summary><div class="secbody">
       <p class="hint">A one-page summary for the mall review: washes, revenue and their share, ratings, damage notes, consent and photos.</p>
-      <div class="row"><label class="inline">Month <select id="rMonth"></select></label><label class="inline">Site <select id="rSite"></select></label><button class="btn go sm" id="rBuild" type="button">Create report</button></div>
-      <div id="report" hidden></div></div>
-    <div class="card"><div class="row" style="justify-content:space-between"><h3>Booking QR codes</h3><button class="btn alt sm" id="qrPrint" type="button">Print QR sheet</button></div>
-      <p class="hint">Put one at each parking zone. Scanning it opens the booking screen with the site and zone filled in.</p>
-      <div id="qrSheet"></div></div>
+      <div class="row"><label class="inline"><span class="hint">Month</span><select id="rMonth"></select></label><label class="inline"><span class="hint">Site</span><select id="rSite"></select></label></div>
+      <button class="btn go" id="rBuild" type="button">Create report</button>
+      <div id="report" class="panel" hidden></div>
+    </div></details>
+
+    <details class="sec" id="qrCard"><summary>Parking QR codes</summary><div class="secbody">
+      <p class="hint">Put one at each parking zone. Scanning it opens the booking page with the site and zone filled in.</p>
+      <button class="btn alt" id="qrPrint" type="button">Print QR sheet</button>
+      <div id="qrSheet"></div>
+    </div></details>
     <p class="hint">Example tickets are left out. Revenue uses the prices in settings.js.</p>
   </section>
-</div>
+</main>
+
+<dialog class="sheet" id="walkDlg" aria-labelledby="walkTitle">
+  <div class="sheethead"><h2 id="walkTitle">Walk-up booking</h2><button class="iconbtn" type="button" id="walkClose" aria-label="Close">✕</button></div>
+  <form id="walkForm" novalidate>
+    <p class="hint">For customers who don’t scan the QR code.</p>
+    <label>Car number<input id="w-plate" autocomplete="off" autocapitalize="characters" placeholder="KA 19 MN 4821"></label>
+    <div class="two">
+      <label>Zone<select id="w-zone"></select></label>
+      <label>Bay<input id="w-bay" autocomplete="off" placeholder="47"></label>
+    </div>
+    <label>Customer WhatsApp (optional)<input id="w-phone" inputmode="tel" autocomplete="off" placeholder="98450 12345"></label>
+    <fieldset class="svcs" id="w-services"></fieldset>
+    <div class="handover">
+      <b>Hand the phone to the customer to read and tick this box.</b>
+      <label class="check"><input type="checkbox" id="w-consent"><span>I am the owner or driver of this car and I authorise the attendant to clean it in this bay. Before and after photos will be taken.</span></label>
+    </div>
+    <p class="err" id="walkErr" hidden></p>
+    <button class="btn go big" type="submit">Create booking</button>
+  </form>
+</dialog>
+
 <script src="qrcode.js"></script>
 <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
-<script type="module" src="app.js?v=202610161337"></script>
+<script type="module" src="app.js?v=202610161704"></script>
 </body>
 </html>
