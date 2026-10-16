@@ -5,13 +5,13 @@ export const business = {
   upiId: "",
   // Name shown in the customer's UPI app.
   payeeName: "Parking Wash",
-  // Price per service in rupees. 0 means the customer types the amount in their UPI app.
+  // Price per service in rupees (sample prices for the demo; change before launch). 0 means the customer types the amount in their UPI app.
   prices: {
-    "Exterior eco wash": 0,
-    "Interior cleaning": 0,
-    "Full wash, inside and out": 0,
-    "Steam interior cleaning": 0,
-    "Tyre pressure check": 0,
-    "Battery check": 0,
+    "Exterior eco wash": 249,
+    "Interior cleaning": 299,
+    "Full wash, inside and out": 499,
+    "Steam interior cleaning": 699,
+    "Tyre pressure check": 50,
+    "Battery check": 100,
   },
 };
