@@ -392,7 +392,7 @@ function headHTML(tk, showPhone) {
   return `<div class="tk-head"><div class="row"><span class="plate">${esc(tk.plate)}</span>
     <span class="chip st-${st}">${LABEL[st]}</span>${tk.example ? '<span class="ex">Example</span>' : ''}</div>
     <span class="mono">${esc(code(tk))}</span></div>
-    <div class="tk-meta"><span>Bay <b>${esc(tk.bay)}</b></span><span>${esc(tk.service)}</span>
+    <div class="tk-meta"><span>Bay <b>${esc(tk.bay)}</b></span><span>${esc(tk.service)}${price(tk) ? ` · <b>₹${price(tk)}</b>` : ''}</span>
     ${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}
     ${showPhone ? `<span>WhatsApp <b>${esc(mask(tk.phone))}</b></span>` : ''}</div>`;
 }
@@ -634,6 +634,13 @@ $('#exBtn').addEventListener('click', async () => {
 });
 
 // ---- start
+// Show each service with its price; the stored value stays the plain service name.
+document.querySelectorAll('#f-service option').forEach(opt => {
+  const name = opt.value || opt.textContent.trim();
+  opt.value = name;
+  const pr = Number(business.prices?.[name] || 0);
+  opt.textContent = pr ? `${name} · ₹${pr}` : name;
+});
 setMode(false);
 const hashTab = location.hash.replace('#', '');
 show(TABS.includes(hashTab) ? hashTab : store.get('pwt-tab', 'customer'));
