@@ -113,6 +113,16 @@ No rules change. The app now looks and works like this:
 - **Security log:** Add example tickets and Clear test tickets are under **Testing tools** (owner only).
 - Dark mode follows the phone's setting.
 
+## Version 6: wait time, return time, checklist, live board, complaints
+
+Publish the new `firestore.rules` once (Firestore → Rules → paste → Publish).
+
+- **Wait time:** the booking page shows “Ready in about 40 min · 2 cars ahead”. It is worked out from open jobs, recent wash times and how many attendants are working, and only shows while a staff phone is signed in. The ticket shows the expected ready time.
+- **Return time:** customers choose when they’ll be back. Attendants see “back 6:30 PM” on each job, late jobs turn red, and jobs are sorted by who is due back first. The monthly report shows how many were ready in time.
+- **Service checklist:** during the wash the attendant ticks each item (set per service in `settings.js` under `checklists`). Wash complete stays locked until every item is ticked and the after-photo is taken. The customer and security see “What we did”.
+- **Live board:** Dashboard → Parking QR codes → **Open live board**. A read-only screen for the mall’s security room or parking office: waiting, being washed, ready, and today’s figures. No login; plates are partly hidden. It updates while any staff phone at that site is signed in.
+- **Complaints:** customers tap **Report a problem** on a paid ticket (once). The owner gets an alert, and the Dashboard’s **Complaints** section shows it with the photos, a button to message the customer and **Mark resolved** with a note. The customer sees the resolution on their ticket.
+
 ## Before real customers use it
 
 - **Real WhatsApp alerts:** alerts are prepared in the app and opened in WhatsApp; sending them automatically needs the WhatsApp Business API through a provider.

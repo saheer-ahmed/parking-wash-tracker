@@ -22,6 +22,16 @@ export const business = {
   sites: [
     { id: "forum", name: "Forum Mall, Mangalore", sharePct: 15, zones: ["Level B1", "Level B2", "Ground"] },
   ],
+  // What the attendant ticks off for each service before "Wash complete" unlocks.
+  // The customer sees the ticked list on their ticket.
+  checklists: {
+    "Exterior eco wash": ["Body panels", "Windows and mirrors", "Wheels and tyres", "Door edges and handles"],
+    "Interior cleaning": ["Seats vacuumed", "Floor mats", "Dashboard and console", "Inside of windows"],
+    "Full wash, inside and out": ["Body panels", "Windows and mirrors", "Wheels and tyres", "Door edges and handles", "Seats vacuumed", "Floor mats", "Dashboard and console", "Inside of windows"],
+    "Steam interior cleaning": ["Seats steamed", "Floor mats steamed", "Dashboard and vents", "Door panels"],
+    "Tyre pressure check": ["Tyre pressure checked and set"],
+    "Battery check": ["Battery terminals and charge checked"],
+  },
   // Loyalty: every Nth paid wash for the same car gets this discount.
   loyalty: { every: 5, discountPct: 50 },
 };

@@ -43,7 +43,12 @@ service cloud.firestore {
             && d().plateKey is string && d().plateKey.size() >= 6 && d().plateKey.size() <= 12
             && d().bay is string && d().bay.size() <= 40
             && d().phone is string && d().phone.size() <= 20
-            && d().get('site', 'forum') is string && d().get('site', 'forum').size() <= 40;
+            && d().get('site', 'forum') is string && d().get('site', 'forum').size() <= 40
+            && d().get('backBy', '') is string && d().get('backBy', '').size() <= 40;
+      }
+      function goodIssue() {
+        return d().issue.keys().hasOnly(['status', 'type', 'text', 'at']) && d().issue.status == 'open'
+            && d().issue.text is string && d().issue.text.size() <= 500 && d().issue.type is string && d().issue.type.size() <= 60;
       }
       function staffHere() {
         return hasRole(['owner']) || (hasRole(['attendant']) && o().get('site', 'forum') == userSite());
@@ -60,12 +65,12 @@ service cloud.firestore {
 
       allow create: if
           // Customer books from the QR code.
-          (goodBooking() && d().keys().hasOnly(['code', 'plate', 'plateKey', 'bay', 'phone', 'service', 'site', 'zone', 'day', 'status', 'consent', 'bookedAt', 'alerts']))
+          (goodBooking() && d().keys().hasOnly(['code', 'plate', 'plateKey', 'bay', 'phone', 'service', 'site', 'zone', 'day', 'status', 'consent', 'bookedAt', 'alerts', 'backBy', 'estReadyAt']))
           ||
           // Attendant books a walk-up customer at their own site.
           (goodBooking() && hasRole(['attendant', 'owner']) && d().walkUp == true && d().createdBy == request.auth.uid
             && (hasRole(['owner']) || d().site == userSite())
-            && d().keys().hasOnly(['code', 'plate', 'plateKey', 'bay', 'phone', 'service', 'site', 'zone', 'day', 'status', 'consent', 'bookedAt', 'alerts', 'walkUp', 'createdBy']))
+            && d().keys().hasOnly(['code', 'plate', 'plateKey', 'bay', 'phone', 'service', 'site', 'zone', 'day', 'status', 'consent', 'bookedAt', 'alerts', 'walkUp', 'createdBy', 'backBy']))
           ||
           (hasRole(['owner']) && d().example == true);
 
@@ -77,6 +82,13 @@ service cloud.firestore {
           (o().status == 'closed' && d().status == 'closed' && !('rating' in o())
             && changed().hasOnly(['rating', 'ratingComment', 'ratedAt']) && goodRating())
           ||
+          // Customer reports a problem on a finished wash (once).
+          (o().status == 'closed' && d().status == 'closed' && !('issue' in o())
+            && changed().hasOnly(['issue', 'alerts']) && goodIssue())
+          ||
+          // Owner resolves a complaint.
+          (hasRole(['owner']) && ('issue' in o()) && changed().hasOnly(['issue', 'alerts']))
+          ||
           (staffHere() && locked() && o().status in ['verified', 'washing', 'ready']
             && d().status == o().status && d().attendantUid == request.auth.uid
             && changed().hasOnly(['attendant', 'attendantUid', 'alerts']))
@@ -87,7 +99,7 @@ service cloud.firestore {
             || (step('washing', 'ready') && 'after' in d().photos)
             || step('ready', 'closed')
             || ((step('booked', 'noshow') || step('verified', 'noshow')) && d().noshowReason is string && d().noshowReason.size() <= 100)
-            || (d().status == o().status && changed().hasOnly(['photos', 'damage']))
+            || (d().status == o().status && changed().hasOnly(['photos', 'damage', 'checklist']))
           ));
 
       allow delete: if hasRole(['owner']);
@@ -100,6 +112,16 @@ service cloud.firestore {
                     && request.resource.data.keys().hasOnly(['before', 'after', 'damage'])
                     && get(/databases/$(database)/documents/tickets/$(ticketId)).data.get('attendantUid', '') in ['', request.auth.uid];
       allow delete: if hasRole(['owner']);
+    }
+
+    // Queue figures and the live board for each site. Anyone can read one site's document;
+    // staff phones write it. It holds counts and masked plates only.
+    match /public/{siteId} {
+      allow get: if true;
+      allow list: if false;
+      allow write: if (hasRole(['owner']) || (hasRole(['attendant', 'security']) && userSite() == siteId))
+                    && request.resource.data.keys().hasOnly(['ahead', 'avgMin', 'workers', 'jobs', 'today', 'updatedAt'])
+                    && request.resource.data.jobs is list && request.resource.data.jobs.size() <= 40;
     }
 
     // Attendant shifts: one document per person per day, id "<uid>_<YYYY-MM-DD>".

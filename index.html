@@ -323,6 +323,56 @@ label.inline select{width:auto;min-height:42px;padding:8px 10px}
 }
 @media (max-width:360px){.two{grid-template-columns:1fr}.svcgrid{grid-template-columns:1fr}}
 
+/* Wait estimate, return time, checklist, complaints */
+.eta{display:flex;flex-direction:column;gap:2px;background:var(--work-bg);color:var(--work);border-radius:var(--r-sm);padding:12px 14px;font-size:14px}
+.eta b{font-size:16px}
+.eta.tight{background:var(--wait-bg);color:var(--wait)}
+.backby{font-weight:600;color:var(--muted);font-size:13px}
+.late{font-weight:800;color:var(--bad);font-size:13px}
+.cklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ck{flex-direction:row;align-items:center;gap:12px;font-weight:600;font-size:15.5px;background:var(--surface);border:1.5px solid var(--line-2);border-radius:var(--r-sm);padding:12px 14px;min-height:54px;cursor:pointer}
+.ck input{width:24px;height:24px;min-height:0;flex:none;margin:0;accent-color:var(--ready)}
+.ck:has(input:checked){border-color:var(--ready);background:var(--ready-bg);color:var(--ready)}
+.cklist.view{gap:6px}
+.cklist.view h3{display:flex;gap:8px;align-items:baseline}
+.cklist.view ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:14px;color:var(--muted)}
+.cklist.view li::before{content:'○ ';color:var(--line-2)}
+.cklist.view li.on{color:var(--ink)}
+.cklist.view li.on::before{content:'✓ ';color:var(--ready);font-weight:800}
+.issue summary{list-style:none;width:fit-content}.issue summary::-webkit-details-marker{display:none}
+.issueform{display:flex;flex-direction:column;gap:12px;padding-top:8px}
+textarea{resize:vertical;min-height:90px;line-height:1.4}
+.issuebox{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-radius:var(--r-sm);font-size:14px;background:var(--bad-bg);color:var(--ink);border-left:4px solid var(--bad)}
+.issuebox.resolved{background:var(--done-bg);border-left-color:var(--ready)}
+.issuecard{display:flex;flex-direction:column;gap:10px;border:1px solid var(--line);border-left:4px solid var(--bad);border-radius:var(--r-sm);padding:14px;background:var(--surface-2)}
+.issuecard.resolved{border-left-color:var(--ready);opacity:.8}
+
+/* Live board */
+.boardmode .appbar,.boardmode main>:not(#v-board){display:none!important}
+.boardmode .wrap{max-width:none;padding:24px}
+.board{display:flex;flex-direction:column;gap:20px;min-height:calc(100vh - 48px)}
+.bhead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.bhead b{display:block;font-size:clamp(26px,3.4vw,44px);font-weight:800;letter-spacing:-.01em}
+.bhead span{color:var(--muted);font-size:clamp(15px,1.6vw,20px)}
+.bclock{text-align:right}.bclock b{font-size:clamp(30px,4vw,52px)}
+.bclock span{display:block;font-weight:700}.bclock span.on{color:var(--ready)}
+.bclock span.on::before{content:'● '}
+.bcols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;flex:1}
+.bcol{background:var(--surface);border:1px solid var(--line);border-top:8px solid var(--line-2);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.bcol.w{border-top-color:var(--wait)}.bcol.p{border-top-color:var(--work)}.bcol.r{border-top-color:var(--ready)}
+.bcol h2{display:flex;justify-content:space-between;font-size:clamp(20px,2.2vw,28px)}
+.bcol h2 span{color:var(--muted)}
+.brow{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line);font-size:clamp(15px,1.5vw,20px)}
+.brow .plate{font-size:clamp(15px,1.5vw,20px)}
+.brow.late .bage{color:var(--bad);font-weight:800}
+.bwhere{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.bage{color:var(--muted);white-space:nowrap}
+.bempty{color:var(--muted)}
+.bstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.bstats div{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;display:flex;flex-direction:column}
+.bstats span{color:var(--muted);font-size:14px;font-weight:600}.bstats b{font-size:clamp(22px,2.4vw,32px);font-weight:800}
+@media (max-width:760px){.bcols{grid-template-columns:1fr}}
+
 /* Motion */
 @media (prefers-reduced-motion:no-preference){
   .panel:not([hidden]){animation:fade .2s ease-out}
@@ -406,6 +456,13 @@ label.inline select{width:auto;min-height:42px;padding:8px 10px}
             <label class="svc"><input type="checkbox" value="Battery check"><span>Battery check</span><b data-price></b></label>
           </div>
         </fieldset>
+        <label>When will you be back at the car?
+          <select id="f-back">
+            <option value="">Not sure</option><option value="30">In 30 minutes</option><option value="60">In 1 hour</option>
+            <option value="90">In 1.5 hours</option><option value="120">In 2 hours</option><option value="180">In 3 hours or more</option>
+          </select>
+        </label>
+        <p class="eta" id="f-eta" hidden></p>
         <label>WhatsApp number for updates
           <input id="f-phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="98450 12345" required>
         </label>
@@ -475,6 +532,9 @@ label.inline select{width:auto;min-height:42px;padding:8px 10px}
     <button class="fab" id="walkFab" type="button">+ Walk-up</button>
   </section>
 
+  <!-- LIVE BOARD (?board=site) -->
+  <section class="board" id="v-board" hidden></section>
+
   <!-- SECURITY -->
   <section class="panel" id="v-security" role="tabpanel" aria-labelledby="tab-security" hidden>
     <div class="kpis" id="stats"></div>
@@ -521,6 +581,10 @@ label.inline select{width:auto;min-height:42px;padding:8px 10px}
     </div>
     <div class="kpis" id="dashStats"></div>
 
+    <details class="sec" id="issueCard"><summary>Complaints <span class="meta" id="issueMeta"></span></summary><div class="secbody">
+      <div class="panel" id="issues"></div>
+    </div></details>
+
     <details class="sec" open><summary>Team today <span class="meta" id="teamMeta"></span></summary><div class="secbody">
       <div class="tablebox"><table class="small">
         <thead><tr><th>Name</th><th>Status</th><th class="num">Start</th><th class="num">Hours</th><th class="num">Washes</th></tr></thead>
@@ -560,6 +624,8 @@ label.inline select{width:auto;min-height:42px;padding:8px 10px}
     <details class="sec" id="qrCard"><summary>Parking QR codes</summary><div class="secbody">
       <p class="hint">Put one at each parking zone. Scanning it opens the booking page with the site and zone filled in.</p>
       <button class="btn alt" id="qrPrint" type="button">Print QR sheet</button>
+      <p class="hint">The live board is a read-only screen for the mall’s security room or parking office. It needs no login and shows only part of each number plate.</p>
+      <div class="row" id="boardLinks"></div>
       <div id="qrSheet"></div>
     </div></details>
     <p class="hint">Example tickets are left out. Revenue uses the prices in settings.js.</p>
@@ -575,6 +641,7 @@ label.inline select{width:auto;min-height:42px;padding:8px 10px}
       <label>Zone<select id="w-zone"></select></label>
       <label>Bay<input id="w-bay" autocomplete="off" placeholder="47"></label>
     </div>
+    <label>Customer back in<select id="w-back"><option value="">Not sure</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours or more</option></select></label>
     <label>Customer WhatsApp (optional)<input id="w-phone" inputmode="tel" autocomplete="off" placeholder="98450 12345"></label>
     <fieldset class="svcs" id="w-services"></fieldset>
     <div class="handover">
@@ -588,6 +655,6 @@ label.inline select{width:auto;min-height:42px;padding:8px 10px}
 
 <script src="qrcode.js"></script>
 <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
-<script type="module" src="app.js?v=202610161704"></script>
+<script type="module" src="app.js?v=202610161747"></script>
 </body>
 </html>

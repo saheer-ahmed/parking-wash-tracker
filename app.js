@@ -2,8 +2,8 @@
 // Customers book without an account and only ever see their own ticket.
 // Staff sign in; the owner gives each account a role (attendant or mall security) on the Staff tab.
 
-import { firebaseConfig } from './firebase-config.js?v=202610161704';
-import { business } from './settings.js?v=202610161704';
+import { firebaseConfig } from './firebase-config.js?v=202610161747';
+import { business } from './settings.js?v=202610161747';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, getDocs, onSnapshot, query, orderBy, limit, where,
@@ -134,6 +134,13 @@ function upiLink(tk) {
   return 'upi://pay?' + Object.entries(q).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }
 
+// ---- service checklist, return time, plate masking
+const checklistFor = tk => [...new Set(items(tk.service).flatMap(n => business.checklists?.[n] || []))];
+const checklistDone = tk => checklistFor(tk).every(i => tk.checklist?.[i]);
+const isLate = tk => !!(tk.backBy && !DONE.includes(tk.status) && tk.status !== 'ready' && new Date(tk.backBy) < new Date());
+const maskPlate = p => { const g = String(p || '').split(' '); return g.length >= 3 ? `${g[0]} ${g[1]} ·· ${g[g.length - 1]}` : String(p || '').replace(/^(.{2}).*(.{4})$/, '$1 ·· $2'); };
+const ISSUE_TYPES = ['Damage to my car', 'Not cleaned properly', 'Payment problem', 'Attendant behaviour', 'Something else'];
+
 const findTicket = id => tickets.find(x => x.id === id) || (myTickets.has(id) ? { id, ...myTickets.get(id) } : null);
 
 // ---- tabs and access
@@ -202,6 +209,10 @@ $('#bookForm').addEventListener('submit', async e => {
   const tk = { code: c, plate: prettyPlate(plate), plateKey: norm(plate), bay, phone, service: chosen().join(SEP),
     site: urlSite, zone: urlZone, day: dayKey(), status: 'booked', consent: true, bookedAt: at,
     alerts: [{ at, text: 'Booking confirmed with ticket ' + c }] };
+  const back = Number($('#f-back').value);
+  if (back) tk.backBy = new Date(Date.now() + back * 60000).toISOString();
+  const eta = etaMin();
+  if (eta) tk.estReadyAt = new Date(Date.now() + eta * 60000).toISOString();
   $('#bookBtn').disabled = true;
   try {
     await setDoc(ref, tk);
@@ -215,6 +226,27 @@ $('#bookForm').addEventListener('submit', async e => {
     err.hidden = false;
   } finally { $('#bookBtn').disabled = false; }
 });
+
+// Live queue figures for the booking page. Staff phones keep public/{site} up to date.
+let pub = null;
+function etaMin() {
+  if (!pub || !pub.updatedAt || Date.now() - new Date(pub.updatedAt) > 30 * 60000) return 0;
+  const m = ((pub.ahead || 0) / Math.max(1, pub.workers || 1) + 1) * (pub.avgMin || 30) + 5;
+  return Math.ceil(m / 5) * 5;
+}
+function renderEta() {
+  const box = $('#f-eta'); if (!box) return;
+  const m = etaMin();
+  if (!m) { box.hidden = true; return; }
+  const ahead = pub.ahead || 0;
+  const back = Number($('#f-back').value);
+  box.hidden = false;
+  box.className = 'eta' + (back && back < m ? ' tight' : '');
+  box.innerHTML = `<b>Ready in about ${fmtMin(m)}</b><span>${ahead ? `${ahead} car${ahead === 1 ? '' : 's'} ahead of you` : 'No queue right now'}</span>${back && back < m ? `<span>That’s tight. We may need a little longer than ${fmtMin(back)} right now.</span>` : ''}`;
+}
+function watchPublic(site, cb) {
+  return onSnapshot(doc(fs, 'public', site), snap => cb(snap.exists() ? snap.data() : null), () => cb(null));
+}
 
 function watchMine() {
   mine.forEach(id => {
@@ -305,10 +337,10 @@ function startStaffFeeds() {
   ['tickets', 'staff', 'shifts'].forEach(k => { if (unsubs[k]) { unsubs[k](); unsubs[k] = null; } });
   tickets = []; staff = []; shifts = [];
   const r = role();
-  seenBooked.clear(); seededBooked = false;
+  seenBooked.clear(); seededBooked = false; seenIssues.clear(); seededIssues = false;
   const onTickets = snap => {
     tickets = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.bookedAt || '').localeCompare(a.bookedAt || ''));
-    checkNewBookings();
+    checkNewBookings(); checkNewIssues(); publishSoon();
     $('#offline').hidden = true;
     renderStaffViews();
   };
@@ -338,6 +370,42 @@ function startStaffFeeds() {
   renderStaffViews();
 }
 
+// ---- public queue figures and the live board (no customer data beyond a masked plate and bay)
+const lastPub = new Map();
+function boardData(siteId) {
+  const day = dayKey(); const since24 = Date.now() - 86400000; const since3h = Date.now() - 3 * 3600000;
+  const list = tickets.filter(x => !x.example && (x.site || DEFAULT_SITE) === siteId);
+  const todays = list.filter(x => (x.day || dayKey(new Date(x.bookedAt))) === day);
+  const open = list.filter(x => !DONE.includes(x.status) && new Date(x.bookedAt) > since24)
+    .sort((a, b) => (a.bookedAt || '').localeCompare(b.bookedAt || ''));
+  const recent = list.filter(x => x.status === 'closed' && x.startedAt && x.completedAt).sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')).slice(0, 20);
+  const a = avg(recent.map(x => mins(x.startedAt, x.completedAt)));
+  const doneT = todays.filter(x => x.status === 'closed');
+  const at = avg(doneT.map(x => mins(x.startedAt, x.completedAt)));
+  return {
+    ahead: open.filter(x => x.status !== 'ready').length,
+    avgMin: Math.min(120, Math.max(10, Math.round(a || 30))),
+    workers: Math.max(1, new Set(list.filter(x => x.attendantUid && x.verifiedAt && new Date(x.verifiedAt) > since3h).map(x => x.attendantUid)).size),
+    jobs: open.slice(0, 40).map(x => ({ p: maskPlate(x.plate), z: x.zone || '', b: x.bay || '', s: x.status,
+      t: { booked: x.bookedAt, verified: x.verifiedAt, washing: x.startedAt, ready: x.completedAt }[x.status] || x.bookedAt, late: isLate(x) })),
+    today: { done: doneT.length, booked: todays.length, avgMin: at == null ? null : Math.round(at), damage: todays.filter(x => x.damage?.found).length,
+      consent: todays.filter(x => x.consent).length, photos: doneT.filter(x => x.photos?.before && x.photos?.after).length,
+      issues: list.filter(x => x.issue?.status === 'open').length },
+  };
+}
+let pubTimer = null;
+function publishSoon() { clearTimeout(pubTimer); pubTimer = setTimeout(publishBoards, 1500); }
+async function publishBoards(force) {
+  if (!['owner', 'attendant', 'security'].includes(role())) return;
+  const sites = role() === 'owner' ? SITES.map(x => x.id) : [mySite()];
+  for (const id of sites) {
+    const data = boardData(id); const key = JSON.stringify(data); const prev = lastPub.get(id);
+    if (!force && prev && prev.key === key && Date.now() - prev.at < 5 * 60000) continue;
+    try { await setDoc(doc(fs, 'public', id), { ...data, updatedAt: now() }); lastPub.set(id, { key, at: Date.now() }); } catch {}
+  }
+}
+setInterval(() => publishBoards(), 5 * 60000);
+
 // ---- new booking alert for attendants: sound, vibration and a banner
 const seenBooked = new Set(); let seededBooked = false;
 let actx = null;
@@ -355,6 +423,14 @@ function chime() {
 }
 // Browsers only allow sound after the first tap on the page.
 document.addEventListener('pointerdown', () => { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch {} }, { once: true });
+const seenIssues = new Set(); let seededIssues = false;
+function checkNewIssues() {
+  const open = tickets.filter(x => x.issue?.status === 'open');
+  const fresh = open.filter(x => !seenIssues.has(x.id));
+  open.forEach(x => seenIssues.add(x.id));
+  if (!seededIssues) { seededIssues = true; return; }
+  if (fresh.length && role() === 'owner') { if (soundOn) chime(); toast(`Customer complaint · ${fresh[0].plate}`, true); }
+}
 function checkNewBookings() {
   const booked = tickets.filter(x => x.status === 'booked' && !x.example);
   const fresh = booked.filter(x => !seenBooked.has(x.id) && x.createdBy !== user?.uid);
@@ -379,6 +455,17 @@ async function act(id, action, extra) {
     if (r < 1 || r > 5) return 'Tap a star to choose your rating.';
     const c = String(extra?.comment || '').trim().slice(0, 300);
     Object.assign(patch, { rating: r, ratedAt: now(), ...(c ? { ratingComment: c } : {}) });
+  } else if (action === 'issue') {
+    if (tk.status !== 'closed' || tk.issue) return '';
+    const text = String(extra?.text || '').trim().slice(0, 500);
+    if (text.length < 5) return 'Describe the problem in a few words.';
+    const type = ISSUE_TYPES.includes(extra?.type) ? extra.type : ISSUE_TYPES[ISSUE_TYPES.length - 1];
+    Object.assign(patch, { issue: { status: 'open', type, text, at: now() }, alerts: addAlert(tk, `Problem reported: ${type}`) });
+  } else if (action === 'resolve') {
+    if (role() !== 'owner' || !tk.issue) return 'Only the owner can resolve complaints.';
+    const note = String(extra || '').trim().slice(0, 300);
+    if (!note) return 'Write what was done, for example “Refunded ₹249” or “Re-washed the car”.';
+    Object.assign(patch, { issue: { ...tk.issue, status: 'resolved', resolution: note, resolvedAt: now(), resolvedBy: profile?.name || 'Owner' }, alerts: addAlert(tk, `Problem resolved: ${note}`) });
   } else if (action === 'pay') {
     if (tk.status !== 'ready') return 'Payment opens when your car is ready.';
     Object.assign(patch, { status: 'closed', paidAt: now(), paidVia: 'Customer (demo)', alerts: addAlert(tk, 'Payment received. Ticket closed. Thank you!') });
@@ -399,6 +486,10 @@ async function act(id, action, extra) {
         patch.alerts = addAlert({ alerts: patch.alerts }, `Loyalty wash: ${patch.discountPct}% off. Thank you for coming back!`);
       }
     }
+    if (action === 'check') {
+      if (tk.status !== 'washing') return '';
+      patch.checklist = { ...(tk.checklist || {}), [extra.item]: !!extra.on };
+    }
     if (action === 'nodamage') Object.assign(patch, { damage: { found: false, at: now(), by } });
     if (action === 'damage') {
       const note = String(extra || '').trim();
@@ -417,6 +508,7 @@ async function act(id, action, extra) {
       Object.assign(patch, { status: 'washing', startedAt: now(), alerts: addAlert(tk, tk.damage.found ? `Wash started. Existing damage noted before starting: ${tk.damage.note}` : 'Wash started. Before-photo taken, no existing damage found') });
     }
     if (action === 'done') {
+      if (!checklistDone(tk)) return 'Tick every item on the checklist first.';
       if (!tk.photos?.after) return 'Take the after-photo first.';
       Object.assign(patch, { status: 'ready', completedAt: now(), alerts: addAlert(tk, 'Your car is ready. Pay by UPI link') });
     }
@@ -554,19 +646,24 @@ function renderCustomer() {
   const box = $('#myTickets');
   const list = mine.filter(id => myTickets.has(id)).map(id => ({ id, ...myTickets.get(id) }));
   // Open tickets, plus anything finished today. Older tickets drop off.
-  const shown = list.filter(tk => !DONE.includes(tk.status) || today(tk.paidAt || tk.cancelledAt || tk.noshowAt || tk.bookedAt));
+  const week = Date.now() - 7 * 86400000;
+  const finishedAt = tk => tk.paidAt || tk.cancelledAt || tk.noshowAt || tk.bookedAt;
+  const shown = list.filter(tk => !DONE.includes(tk.status) || today(finishedAt(tk)));
+  const earlier = list.filter(tk => DONE.includes(tk.status) && !today(finishedAt(tk)) && new Date(finishedAt(tk)) > week);
   const active = shown.some(tk => !DONE.includes(tk.status));
   const card = $('#bookCard');
   card.classList.toggle('collapsed', active && !bookOpen);
   $('#bookAnother').hidden = !(active && !bookOpen);
   $('#bookTitle').textContent = active ? 'Need another car washed?' : 'Book a wash for your parked car';
-  box.innerHTML = shown.map(ticketHTML).join('');
+  box.innerHTML = shown.map(ticketHTML).join('') + (earlier.length
+    ? `<details class="sec"><summary>Earlier washes <span class="meta">${earlier.length}</span></summary><div class="secbody">${earlier.map(ticketHTML).join('')}</div></details>` : '');
   flash(box, shown, lastSeen.customer, tk => { if (tk.status === 'ready') { try { navigator.vibrate?.([200, 100, 200]); } catch {} } });
 }
 function ticketHTML(tk) {
   const st = HERO[tk.status] ? tk.status : 'booked';
   const [ic, title, sub] = HERO[st];
-  const subText = st === 'noshow' ? `${tk.noshowReason || 'The attendant couldn’t complete this wash'}. You haven’t been charged.` : sub;
+  let subText = st === 'noshow' ? `${tk.noshowReason || 'The attendant couldn’t complete this wash'}. You haven’t been charged.` : sub;
+  if (['booked', 'verified', 'washing'].includes(st) && tk.estReadyAt) subText += ` Expected ready around ${t(tk.estReadyAt)}.`;
   const al = (tk.alerts || []).slice().reverse();
   return `<article class="card ticket" data-id="${esc(tk.id)}">
     <div class="hero ${st}"><span class="ico">${ICON[ic]}</span><div><h2>${title}</h2><p>${esc(subText)}</p></div></div>
@@ -574,14 +671,41 @@ function ticketHTML(tk) {
       <div class="tline"><span class="plate">${esc(tk.plate)}</span><span class="code">Ticket ${esc(code(tk))}</span>${tk.discountPct ? `<span class="chip st-ready">Loyalty −${tk.discountPct}%</span>` : ''}</div>
       <div class="tk-meta"><span>Bay <b>${esc(bayText(tk))}</b></span><span>${esc(tk.service)}</span>${price(tk) ? `<span>Total <b>₹${price(tk)}</b></span>` : ''}${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}</div>
       ${['cancelled', 'noshow'].includes(st) ? '' : stepsHTML(tk)}
-      ${damageHTML(tk, true)}${photosHTML(tk)}
+      ${tk.backBy && !DONE.includes(st) ? `<p class="hint">You said you’ll be back around <b>${t(tk.backBy)}</b>.</p>` : ''}
+      ${damageHTML(tk, true)}${checklistView(tk)}${photosHTML(tk)}
       ${st === 'ready' ? payHTML(tk) : ''}
       ${st === 'closed' ? (tk.rating ? `<div class="pay"><h3>Thanks for your rating</h3>${ratingHTML(tk)}</div>` : rateHTML()) : ''}
       ${st === 'closed' ? receiptBlock(tk, 'customer') : ''}
+      ${st === 'closed' ? issueCustomerHTML(tk) : ''}
       ${st === 'booked' ? '<div><button class="link danger" data-act="cancel">Cancel booking</button></div>' : ''}
       <details class="upd"><summary>All updates (${al.length})</summary><ul class="alerts">${al.map(a => `<li><time>${t(a.at)}</time><span>${esc(a.text)}</span></li>`).join('')}</ul></details>
       <p class="err" hidden></p>
     </div></article>`;
+}
+// What the attendant ticked off, shown to the customer and security.
+function checklistView(tk) {
+  const list = checklistFor(tk);
+  if (!list.length || !['washing', 'ready', 'closed'].includes(tk.status)) return '';
+  const n = list.filter(i => tk.checklist?.[i]).length;
+  return `<div class="cklist view"><h3>What we did <span class="hint">${n} of ${list.length}</span></h3><ul>${list.map(i =>
+    `<li class="${tk.checklist?.[i] ? 'on' : ''}">${esc(i)}</li>`).join('')}</ul></div>`;
+}
+function issueBadge(tk) {
+  if (!tk.issue) return '';
+  return tk.issue.status === 'resolved' ? '<span class="chip st-closed">Complaint resolved</span>' : '<span class="chip st-noshow">Complaint open</span>';
+}
+function issueCustomerHTML(tk) {
+  if (tk.issue) {
+    const i = tk.issue;
+    return `<div class="issuebox ${i.status}"><b>${i.status === 'resolved' ? 'Problem resolved' : 'Problem reported'}</b>
+      <span>${esc(i.type)}: “${esc(i.text)}” · ${t(i.at)}</span>
+      ${i.status === 'resolved' ? `<span>${esc(i.resolution || '')}</span>` : '<span>We’ll look into it and contact you on WhatsApp.</span>'}</div>`;
+  }
+  return `<details class="issue"><summary class="link">Report a problem</summary><div class="issueform">
+    <label>What went wrong?<select class="itype">${ISSUE_TYPES.map(x => `<option>${esc(x)}</option>`).join('')}</select></label>
+    <label>Tell us more<textarea class="itext" maxlength="500" rows="3" placeholder="For example: small scratch on the left door that wasn’t there before"></textarea></label>
+    <p class="hint">The before and after photos are attached automatically.</p>
+    <button class="btn alt" data-act="issue">Send</button></div></details>`;
 }
 function rateHTML() {
   return `<div class="pay rate"><h3>How was your wash?</h3>
@@ -670,7 +794,7 @@ function stage(tk) {
   const p = tk.photos || {};
   if (tk.status === 'booked') return [1, 'Find and verify the car'];
   if (tk.status === 'verified') return !tk.damage ? [2, 'Check for existing damage'] : !p.before ? [3, 'Take the before-photo'] : [4, 'Start the wash'];
-  if (tk.status === 'washing') return !p.after ? [5, 'Wash, then take the after-photo'] : [6, 'Mark the wash complete'];
+  if (tk.status === 'washing') return !(p.after && checklistDone(tk)) ? [5, 'Wash the car'] : [6, 'Mark the wash complete'];
   if (tk.status === 'ready') return [0, 'Waiting for payment'];
   return [0, ''];
 }
@@ -698,9 +822,12 @@ function nowHTML(tk) {
   } else if (tk.status === 'verified') {
     main = '<button class="btn go big" data-act="start">Start wash</button>';
     more = `${photoBtn('before', true)}<button class="link" data-act="redodamage">Change damage check</button>`;
-  } else if (tk.status === 'washing' && !p.after) {
-    help = 'When you finish, photograph the clean car from the same angle as the before-photo.';
-    main = photoBtn('after', false);
+  } else if (tk.status === 'washing' && !(p.after && checklistDone(tk))) {
+    const list = checklistFor(tk);
+    help = list.length ? 'Tick each item as you finish it, then photograph the clean car from the same angle as the before-photo.' : 'When you finish, photograph the clean car from the same angle as the before-photo.';
+    main = (list.length ? `<ul class="cklist">${list.map(i => `<li><label class="ck"><input type="checkbox" data-check="${esc(i)}" ${tk.checklist?.[i] ? 'checked' : ''}><span>${esc(i)}</span></label></li>`).join('')}</ul>` : '')
+      + (p.after ? `<p class="ok">After-photo taken</p>` : `<button class="btn ${checklistDone(tk) ? 'go big' : 'alt'}" data-photo="after">Take after-photo</button>`);
+    more = p.after ? photoBtn('after', true) : '';
   } else if (tk.status === 'washing') {
     main = '<button class="btn go big" data-act="done">Wash complete</button>';
     more = photoBtn('after', true);
@@ -717,7 +844,7 @@ function jobHTML(tk, group) {
   const since = { booked: tk.bookedAt, verified: tk.verifiedAt, washing: tk.startedAt, ready: tk.completedAt }[tk.status] || tk.bookedAt;
   const age = tk.status === 'booked' ? `waiting ${ago(since)}` : tk.status === 'ready' ? `ready ${ago(since)}` : ago(since);
   const head = `<button class="jobhead" data-toggle="${esc(tk.id)}" aria-expanded="${open}">
-      <span class="plate">${esc(tk.plate)}</span><span class="where">Bay ${esc(bayText(tk))}</span>
+      <span class="plate">${esc(tk.plate)}</span><span class="where">Bay ${esc(bayText(tk))}${tk.backBy && !['ready'].includes(tk.status) ? ` <span class="${isLate(tk) ? 'late' : 'backby'}">${isLate(tk) ? 'Late · ' : ''}back ${t(tk.backBy)}</span>` : ''}</span>
       <span class="svcl">${esc(tk.service)}${price(tk) ? ` · ₹${price(tk)}` : ''}${group === 'other' ? ` · ${esc(tk.attendant || '')}` : ''}</span>
       <span class="chip st-${st}">${LABEL[st]}</span><span class="age">${age}</span></button>`;
   if (!open) return `<article class="job s-${st}${group === 'other' ? ' other' : ''}" data-id="${esc(tk.id)}">${head}</article>`;
@@ -753,7 +880,9 @@ function renderQueue() {
   const box = $('#queue');
   const keep = saveDrafts(box);
   const uid = user?.uid;
-  const asc = (a, b) => (a.bookedAt || '').localeCompare(b.bookedAt || '');
+  // Earliest deadline first: the customer's return time, or 3 hours after booking if they didn't say.
+  const due = x => x.backBy ? new Date(x.backBy).getTime() : new Date(x.bookedAt || 0).getTime() + 3 * 3600000;
+  const asc = (a, b) => due(a) - due(b);
   const open = tickets.filter(x => !DONE.includes(x.status));
   const mineJ = open.filter(x => x.status !== 'booked' && (!x.attendantUid || x.attendantUid === uid)).sort(asc);
   const newJ = open.filter(x => x.status === 'booked').sort(asc);
@@ -794,7 +923,7 @@ function renderSecurity() {
     const times = [['Booked', tk.bookedAt], ['Started', tk.startedAt], ['Done', tk.completedAt], ['Paid', tk.paidAt]]
       .filter(([, v]) => v).map(([l, v]) => `${l} <b>${t(v)}</b>`).join(' · ');
     return `<article class="logcard">
-      <div class="tk-head"><div class="row"><span class="plate">${esc(tk.plate)}</span><span class="chip st-${st}">${LABEL[st]}</span>${tk.example ? '<span class="ex">Example</span>' : ''}</div>
+      <div class="tk-head"><div class="row"><span class="plate">${esc(tk.plate)}</span><span class="chip st-${st}">${LABEL[st]}</span>${issueBadge(tk)}${tk.example ? '<span class="ex">Example</span>' : ''}</div>
         <button class="link mono" data-detail="${esc(tk.id)}">${esc(code(tk))}</button></div>
       <div class="tk-meta"><span>Bay <b>${esc(bayText(tk))}</b></span><span>${esc(tk.service)}</span>${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}</div>
       <div class="tk-meta"><span>Photos <b>${tk.photos?.before ? (tk.photos?.after ? 'Before + after' : 'Before') : 'None yet'}</b></span>
@@ -804,7 +933,7 @@ function renderSecurity() {
   }).join('') : '<div class="empty">No jobs logged today. Each booking appears here with every step timed.</div>';
   const d = detailId && tickets.find(x => x.id === detailId);
   $('#detail').innerHTML = d ? `<article class="card"><div class="row" style="justify-content:space-between"><h3>Ticket ${esc(code(d))}</h3><button class="link" data-detail="">Close</button></div>
-    ${headHTML(d, true)}${stepsHTML(d)}${damageHTML(d, false)}${photosHTML(d) || '<p class="hint">No photos yet.</p>'}${ratingHTML(d)}${d.status === 'closed' ? receiptBlock(d, 'staff') : ''}${alertsHTML(d)}</article>` : '';
+    ${headHTML(d, true)}${stepsHTML(d)}${damageHTML(d, false)}${checklistView(d)}${photosHTML(d) || '<p class="hint">No photos yet.</p>'}${d.issue ? issueCustomerHTML(d) : ''}${ratingHTML(d)}${d.status === 'closed' ? receiptBlock(d, 'staff') : ''}${alertsHTML(d)}</article>` : '';
 }
 
 function renderStaff() {
@@ -880,6 +1009,7 @@ $('#walkForm')?.addEventListener('submit', async e => {
   const by = profile?.name || 'Staff';
   const tk = { code: c, plate: prettyPlate(plate), plateKey: norm(plate), bay, phone, service: svcs.join(SEP),
     site: mySite(), zone: $('#w-zone').value || '', day: dayKey(), status: 'booked', consent: true, bookedAt: at,
+    ...(Number($('#w-back').value) ? { backBy: new Date(Date.now() + Number($('#w-back').value) * 60000).toISOString() } : {}),
     walkUp: true, createdBy: user.uid, alerts: [{ at, text: `Walk-up booking by ${by}. Customer gave consent on the attendant's phone. Ticket ${c}` }] };
   try {
     await setDoc(doc(collection(fs, 'tickets')), tk);
@@ -977,7 +1107,7 @@ function renderDash() {
   $('#comments').innerHTML = cm.length ? cm.map(x => `<li><span class="stars" aria-label="${x.rating} out of 5">${stars(x.rating)}</span> “${esc(x.ratingComment)}” <span class="hint">${esc(x.plate)} · ${new Date(x.ratedAt).toLocaleDateString([], { day: 'numeric', month: 'short' })}</span></li>`).join('')
     : '<li class="hint">Customer comments appear here after they rate a wash.</li>';
 
-  renderRevenue(inSite); renderTeam(); renderQR();
+  renderRevenue(inSite); renderTeam(); renderQR(); renderIssues(inSite);
 }
 
 // ---- dashboard extras: revenue trend, team status, QR codes, monthly report
@@ -1016,6 +1146,24 @@ function renderRevenue(inSite) {
     ? barChart(rev, labels, v => '₹' + Math.round(v).toLocaleString('en-IN'), 'Revenue per day', n > 10 ? 5 : 1) + `<p class="hint">Revenue from paid washes, by the day they were paid. Total ${inr(rev.reduce((a, b) => a + b, 0))}.</p>`
     : '<div class="empty">No paid washes in this period yet.</div>';
 }
+function renderIssues(inSite) {
+  const box = $('#issues'); if (!box) return;
+  const all = tickets.filter(x => x.issue && inSite(x)).sort((a, b) => (b.issue.at || '').localeCompare(a.issue.at || ''));
+  const open = all.filter(x => x.issue.status === 'open');
+  $('#issueMeta').textContent = open.length ? `${open.length} open` : all.length ? 'All resolved' : '';
+  if (open.length) $('#issueCard').open = true;
+  box.innerHTML = all.length ? all.slice(0, 20).map(tk => `<div class="issuecard ${tk.issue.status}" data-id="${esc(tk.id)}">
+      <div class="row between"><span class="row"><span class="plate sm">${esc(tk.plate)}</span><span class="hint">${esc(code(tk))} · ${esc(tk.attendant || '–')}</span></span>${issueBadge(tk)}</div>
+      <p><b>${esc(tk.issue.type)}</b> · ${new Date(tk.issue.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+      <p>“${esc(tk.issue.text)}”</p>
+      ${damageHTML(tk, false)}${photosHTML(tk)}
+      ${tk.issue.status === 'open'
+        ? `<label>What did you do?<input class="resnote" data-keep="${esc(tk.id)}:r" maxlength="300" placeholder="Refunded ₹249 / re-washed the car / repaired"></label>
+           <div class="row">${tk.phone && waNumber(tk.phone) ? `<a class="btn wa sm" href="https://wa.me/${waNumber(tk.phone)}?text=${encodeURIComponent(`Hi, this is about your car wash ticket ${code(tk)}. We're sorry about the problem you reported and are looking into it.`)}" target="_blank" rel="noopener">Message customer</a>` : ''}<button class="btn go sm" data-act="resolve">Mark resolved</button></div>`
+        : `<p class="ok">Resolved by ${esc(tk.issue.resolvedBy || '')}: ${esc(tk.issue.resolution || '')}</p>`}
+      <p class="err" hidden></p></div>`).join('')
+    : '<p class="hint">No complaints. When a customer reports a problem on their ticket it appears here with the photos.</p>';
+}
 function renderTeam() {
   const box = $('#teamBody'); if (!box) return;
   const people = staff.filter(p => ['attendant', 'owner'].includes(p.role) && (dashSite === 'all' || (p.site || DEFAULT_SITE) === dashSite || p.role === 'owner'));
@@ -1039,6 +1187,9 @@ function bookingUrl(site, zone) {
   u.searchParams.set('site', site); if (zone) u.searchParams.set('zone', zone);
   return u.toString() + '#customer';
 }
+function boardUrl(site) {
+  const u = new URL(location.origin + location.pathname); u.searchParams.set('board', site); return u.toString();
+}
 function qrSvg(text) {
   if (typeof window.qrcode !== 'function') return '';
   const q = window.qrcode(0, 'M'); q.addData(text); q.make();
@@ -1047,6 +1198,7 @@ function qrSvg(text) {
 function renderQR() {
   const box = $('#qrSheet'); if (!box || box.dataset.done) return;
   box.dataset.done = '1';
+  $('#boardLinks').innerHTML = SITES.map(st => `<a class="btn alt sm" href="${esc(boardUrl(st.id))}" target="_blank" rel="noopener">Open live board${SITES.length > 1 ? ' · ' + esc(st.name) : ''}</a>`).join('');
   box.innerHTML = SITES.map(st => `<h4>${esc(st.name)}</h4><div class="qrgrid">${[...(st.zones || []), ''].map(z => {
     const url = bookingUrl(st.id, z);
     return `<figure class="qrcard">${qrSvg(url)}<figcaption><b>${z ? esc(z) : 'Any zone'}</b><span>Scan to book a wash</span><a href="${esc(url)}" target="_blank" rel="noopener">Open link</a></figcaption></figure>`;
@@ -1095,6 +1247,9 @@ function buildReport() {
     ['Cancelled by customer', String(list.filter(x => x.status === 'cancelled').length)],
     ['Not done (car not found or customer left)', String(list.filter(x => x.status === 'noshow').length)],
     ['Busiest hour', list.length ? `${pad(peak)}:00–${pad(peak + 1)}:00` : '–'],
+    ['Ready before the customer’s return time', (() => { const w = closed.filter(x => x.backBy && x.completedAt); return w.length ? `${w.filter(x => x.completedAt <= x.backBy).length} of ${w.length}` : '–'; })()],
+    ['Service checklist completed', `${closed.filter(x => checklistFor(x).length && checklistDone(x)).length} of ${closed.filter(x => checklistFor(x).length).length}`],
+    ['Customer complaints', `${list.filter(x => x.issue).length} (${list.filter(x => x.issue?.status === 'resolved').length} resolved)`],
   ];
   reportData.rows = rows;
   $('#report').hidden = false;
@@ -1181,13 +1336,15 @@ document.addEventListener('click', async e => {
   const extra = a === 'verify' ? card.querySelector('.vplate').value
     : a === 'noshow' ? card.querySelector('.nsreason')?.value
     : a === 'damage' ? card.querySelector('.dmgnote').value
-    : a === 'rate' ? { rating: card.dataset.rating, comment: card.querySelector('.rcomment')?.value } : undefined;
+    : a === 'rate' ? { rating: card.dataset.rating, comment: card.querySelector('.rcomment')?.value }
+    : a === 'issue' ? { type: card.querySelector('.itype')?.value, text: card.querySelector('.itext')?.value }
+    : a === 'resolve' ? card.querySelector('.resnote')?.value : undefined;
   const msg = await act(id, b.dataset.act, extra);
   b.disabled = false;
   if (msg && errEl) { errEl.textContent = msg; errEl.hidden = false; errEl.scrollIntoView({ block: 'nearest' }); }
   else if (!msg) {
     if (a === 'damage' || a === 'nodamage') dmgOpen.delete(id);
-    const said = { verify: 'Car verified', nodamage: 'No damage recorded', damage: 'Damage recorded', start: 'Wash started', done: 'Wash complete. Customer notified', paid: 'Cash payment recorded', noshow: 'Closed as not done', takeover: 'Job is yours now', pay: 'Payment done. Thank you!', rate: 'Thanks for your rating' }[a];
+    const said = { issue: 'Sent. We’ll contact you on WhatsApp', resolve: 'Complaint resolved', verify: 'Car verified', nodamage: 'No damage recorded', damage: 'Damage recorded', start: 'Wash started', done: 'Wash complete. Customer notified', paid: 'Cash payment recorded', noshow: 'Closed as not done', takeover: 'Job is yours now', pay: 'Payment done. Thank you!', rate: 'Thanks for your rating' }[a];
     if (said) toast(said, false, false, 'ok');
   }
 });
@@ -1195,6 +1352,13 @@ document.addEventListener('change', async e => {
   const ss = e.target.closest('[data-site-uid]');
   if (ss) { try { await updateDoc(doc(fs, 'roles', ss.dataset.siteUid), { site: ss.value, changedAt: now() }); } catch {} return; }
   if (e.target.id === 'dashSite') { dashSite = e.target.value; renderDash(); return; }
+  if (e.target.id === 'f-back') { renderEta(); return; }
+  const ck = e.target.closest('[data-check]');
+  if (ck) {
+    const card = ck.closest('[data-id]');
+    const msg = await act(card.dataset.id, 'check', { item: ck.dataset.check, on: ck.checked });
+    if (msg) { ck.checked = !ck.checked; toast(msg, true); }
+  }
 });
 
 // One camera input that lives outside the job cards. The cards redraw whenever anything changes,
@@ -1226,10 +1390,11 @@ cam.addEventListener('change', async () => {
 
 // ---- download today's log
 $('#dlBtn').addEventListener('click', () => {
-  const rows = [['Ticket', 'Site', 'Car', 'Bay', 'Service', 'Status', 'Attendant', 'Before photo', 'After photo', 'Booked', 'Verified', 'Started', 'Completed', 'Paid', 'Paid via', 'Existing damage', 'Damage note', 'Rating', 'Comment', 'Total (₹)', 'Discount (₹)', 'Not done reason', 'Walk-up', 'Consent']];
+  const rows = [['Ticket', 'Site', 'Car', 'Bay', 'Service', 'Status', 'Attendant', 'Before photo', 'After photo', 'Booked', 'Verified', 'Started', 'Completed', 'Paid', 'Paid via', 'Existing damage', 'Damage note', 'Rating', 'Comment', 'Total (₹)', 'Discount (₹)', 'Not done reason', 'Walk-up', 'Consent', 'Back by', 'Checklist done', 'Complaint', 'Complaint status']];
   tickets.filter(x => today(x.bookedAt)).forEach(tk => rows.push([code(tk), siteName(tk.site), tk.plate, bayText(tk), tk.service, LABEL[tk.status] || tk.status, tk.attendant || '',
     tk.photos?.before ? 'Yes' : 'No', tk.photos?.after ? 'Yes' : 'No',
-    tk.bookedAt || '', tk.verifiedAt || '', tk.startedAt || '', tk.completedAt || '', tk.paidAt || '', tk.paidVia || '', tk.damage ? (tk.damage.found ? 'Yes' : 'No') : '', tk.damage?.note || '', tk.rating || '', tk.ratingComment || '', price(tk), discount(tk), tk.noshowReason || '', tk.walkUp ? 'Yes' : 'No', tk.consent ? 'Yes' : 'No']));
+    tk.bookedAt || '', tk.verifiedAt || '', tk.startedAt || '', tk.completedAt || '', tk.paidAt || '', tk.paidVia || '', tk.damage ? (tk.damage.found ? 'Yes' : 'No') : '', tk.damage?.note || '', tk.rating || '', tk.ratingComment || '', price(tk), discount(tk), tk.noshowReason || '', tk.walkUp ? 'Yes' : 'No', tk.consent ? 'Yes' : 'No',
+    tk.backBy || '', checklistFor(tk).length ? (checklistDone(tk) ? 'Yes' : 'No') : '', tk.issue ? `${tk.issue.type}: ${tk.issue.text}` : '', tk.issue?.status || '']));
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -1312,6 +1477,30 @@ updateTotal();
   const zi = $('#zoneInfo');
   if (zi) { zi.hidden = !urlZone; zi.textContent = `You’re parked at ${urlZone}`; }
 })();
+const boardSite = SITES.some(x => x.id === params.get('board')) ? params.get('board') : '';
+if (boardSite) startBoard(boardSite);
+function startBoard(site) {
+  document.body.classList.add('boardmode');
+  document.title = `Live board · ${siteName(site)}`;
+  $('#v-board').hidden = false;
+  let data = null;
+  const draw = () => {
+    const el = $('#v-board'); const nowD = new Date();
+    const fresh = data?.updatedAt && Date.now() - new Date(data.updatedAt) < 15 * 60000;
+    const jobs = data?.jobs || [];
+    const col = (title, sts, cls) => { const xs = jobs.filter(j => sts.includes(j.s));
+      return `<section class="bcol ${cls}"><h2>${title}<span>${xs.length}</span></h2>${xs.length ? xs.map(j => `<div class="brow${j.late ? ' late' : ''}"><span class="plate">${esc(j.p)}</span><span class="bwhere">${esc([j.z, j.b].filter(Boolean).join(' · '))}</span><span class="bage">${ago(j.t)}</span></div>`).join('') : '<p class="bempty">None</p>'}</section>`; };
+    const td = data?.today || {};
+    el.innerHTML = `<header class="bhead"><div><b>${esc(brand)}</b><span>${esc(siteName(site))} · live job board</span></div>
+      <div class="bclock"><b>${nowD.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</b><span class="${fresh ? 'on' : ''}">${fresh ? 'Live' : data?.updatedAt ? 'Last update ' + t(data.updatedAt) : 'Waiting for staff to sign in'}</span></div></header>
+      <div class="bcols">${col('Waiting', ['booked'], 'w')}${col('Being washed', ['verified', 'washing'], 'p')}${col('Ready for pickup', ['ready'], 'r')}</div>
+      <footer class="bstats">${[['Washes today', td.done ?? 0], ['Bookings today', td.booked ?? 0], ['Average wash', td.avgMin == null ? '–' : td.avgMin + ' min'],
+        ['Consent recorded', `${td.consent ?? 0} of ${td.booked ?? 0}`], ['Before + after photos', `${td.photos ?? 0} of ${td.done ?? 0}`], ['Damage noted before wash', td.damage ?? 0], ['Open complaints', td.issues ?? 0]]
+        .map(([l, v]) => `<div><span>${l}</span><b>${v}</b></div>`).join('')}</footer>`;
+  };
+  watchPublic(site, d => { data = d; draw(); });
+  setInterval(draw, 30000); draw();
+}
 setMode(false);
 soundOn = store.get('pwt-sound', true);
 $('#brandName').textContent = brand;
@@ -1322,6 +1511,7 @@ const hashTab = location.hash.replace('#', '');
 show(TABS.includes(hashTab) ? hashTab : store.get('pwt-tab', 'customer'));
 watchMine();
 renderCustomer(); renderStaffViews();
+if (!boardSite) watchPublic(urlSite, d => { pub = d; renderEta(); });
 $('#liveDot').classList.add('on');
 $('#liveText').textContent = 'Live updates on';
 window.addEventListener('offline', () => { $('#liveDot').classList.remove('on'); $('#liveText').textContent = 'Offline'; });
