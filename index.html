@@ -98,25 +98,41 @@ td.t{font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums;
 @media (max-width:640px){form{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.steps li{font-size:11px}}
 @media (prefers-reduced-motion:no-preference){.card{transition:border-color .2s}}
 </style>
-<style>[hidden]{display:none!important}body{margin:0}img{max-width:100%}</style>
+<style>
+[hidden]{display:none!important}body{margin:0}img{max-width:100%}
+.who{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.whoName{font-size:14px;color:var(--muted)}.whoName b{color:var(--ink)}
+.link{font:600 14px var(--f-body);background:none;border:0;padding:6px 2px;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer;min-height:32px}
+.link.mono{font-family:var(--f-mono);font-size:13px;font-weight:500}
+.ok{color:var(--s-ready);font-size:14px;font-weight:600;margin:0}
+.btn.sm{padding:6px 10px;min-height:36px;font-size:13px}
+@media (max-width:640px){.who{align-items:flex-start}}
+</style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
       <h1>Parking Wash Tracker</h1>
-      <p class="sub">Booking, consent and job tracking for on-site car washing · Forum Mall pilot demo</p>
+      <p class="sub">Booking, consent and job tracking for on-site car washing · Forum Mall pilot</p>
     </div>
-    <div class="live" id="live"><span class="dot" id="liveDot"></span><span id="liveText">Connecting…</span></div>
+    <div class="who">
+      <div class="live" id="live"><span class="dot" id="liveDot"></span><span id="liveText">Connecting…</span></div>
+      <div class="row" id="whoBox" hidden>
+        <span class="whoName"><b id="whoName"></b> · <span id="whoRole"></span></span>
+        <button class="link" id="signOutBtn">Sign out</button>
+      </div>
+    </div>
   </header>
 
   <nav role="tablist" aria-label="View as">
     <button role="tab" id="tab-customer" aria-controls="v-customer" aria-selected="true">Customer</button>
     <button role="tab" id="tab-attendant" aria-controls="v-attendant" aria-selected="false">Attendant</button>
     <button role="tab" id="tab-security" aria-controls="v-security" aria-selected="false">Mall security</button>
+    <button role="tab" id="tab-staff" aria-controls="v-staff" aria-selected="false" hidden>Staff</button>
   </nav>
 
-  <p class="notice" id="offline" hidden>Not connected to Firebase yet, so tickets stay on this screen only. Add your settings to firebase-config.js (see SETUP.md) to share them live.</p>
+  <p class="notice" id="offline" hidden>Can’t reach the database. Check your connection and reload.</p>
 
   <!-- CUSTOMER -->
   <section class="panel" id="v-customer" role="tabpanel" aria-labelledby="tab-customer">
@@ -144,7 +160,7 @@ td.t{font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums;
           <input id="f-phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="98450 12345" required>
         </label>
         <label class="check full"><input type="checkbox" id="f-consent" required>
-          <span>I am the owner or driver of this car and I authorise the attendant to clean it in this bay. Exterior washes need no keys.</span>
+          <span>I am the owner or driver of this car and I authorise the attendant to clean it in this bay. Before and after photos will be taken. Exterior washes need no keys.</span>
         </label>
         <p class="err full" id="bookErr" hidden></p>
         <div class="full row"><button class="btn go" type="submit" id="bookBtn">Book wash</button></div>
@@ -153,15 +169,44 @@ td.t{font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums;
     <div class="panel" id="myTickets"></div>
   </section>
 
+  <!-- SIGN IN (shown for staff tabs when not signed in or not allowed) -->
+  <section class="panel" id="v-signin" hidden>
+    <div class="card" id="signinCard">
+      <h2 id="signinTitle">Staff sign in</h2>
+      <p class="hint" id="signinHint">Attendants and mall security sign in to see jobs. Customers don’t need an account.</p>
+      <form id="authForm" novalidate>
+        <label class="full" id="nameWrap" hidden>Your name
+          <input id="a-name" autocomplete="name" placeholder="Name shown on tickets">
+        </label>
+        <label>Email
+          <input id="a-email" type="email" autocomplete="email" required>
+        </label>
+        <label>Password
+          <input id="a-pass" type="password" autocomplete="current-password" minlength="6" required>
+        </label>
+        <p class="err full" id="authErr" hidden></p>
+        <p class="ok full" id="authOk" hidden></p>
+        <div class="full row">
+          <button class="btn go" type="submit" id="authBtn">Sign in</button>
+          <button class="link" type="button" id="modeBtn">New staff member? Create an account</button>
+          <button class="link" type="button" id="resetBtn">Forgot password</button>
+        </div>
+      </form>
+    </div>
+    <div class="card" id="pendingCard" hidden>
+      <h2>Waiting for approval</h2>
+      <p class="hint">Your account is set up. The owner needs to give you access as an attendant or mall security. Ask them to open the Staff tab, then reload this page.</p>
+    </div>
+    <div class="card" id="noAccessCard" hidden>
+      <h2>This view isn’t part of your role</h2>
+      <p class="hint" id="noAccessText"></p>
+    </div>
+  </section>
+
   <!-- ATTENDANT -->
   <section class="panel" id="v-attendant" role="tabpanel" aria-labelledby="tab-attendant" hidden>
     <div class="card">
-      <div class="verify">
-        <label>Attendant on duty
-          <input id="f-att" autocomplete="off" placeholder="Your name">
-        </label>
-      </div>
-      <p class="hint">Work only on booked tickets. Re-type the car number from the plate before starting; it must match the booking.</p>
+      <p class="hint"><b>Rules:</b> work only on booked tickets. Re-type the number plate to verify the car. A before-photo is required to start, and an after-photo to finish.</p>
     </div>
     <div class="panel" id="queue"></div>
   </section>
@@ -171,16 +216,28 @@ td.t{font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums;
     <div class="stats" id="stats"></div>
     <div class="row" style="justify-content:space-between">
       <h2>Today's job log</h2>
-      <div class="row"><button class="btn alt" id="exBtn">Add example tickets</button><button class="btn alt" id="dlBtn">Download today's log (CSV)</button></div>
+      <div class="row"><button class="btn alt" id="exBtn" hidden>Add example tickets</button><button class="btn alt" id="dlBtn">Download today's log (CSV)</button></div>
     </div>
     <div class="tablebox"><table>
-      <thead><tr><th>Ticket</th><th>Car</th><th>Bay</th><th>Service</th><th>Status</th><th>Attendant</th><th>Booked</th><th>Verified</th><th>Started</th><th>Done</th><th>Paid</th></tr></thead>
+      <thead><tr><th>Ticket</th><th>Car</th><th>Bay</th><th>Service</th><th>Status</th><th>Attendant</th><th>Photos</th><th>Booked</th><th>Verified</th><th>Started</th><th>Done</th><th>Paid</th></tr></thead>
       <tbody id="logBody"></tbody>
     </table></div>
-    <p class="hint">Phone numbers are masked for security staff. Example tickets are marked and are for demonstrations only.</p>
+    <p class="hint">Tap a ticket number to see its photos and alert history. Phone numbers are masked.</p>
+    <div class="panel" id="detail"></div>
+  </section>
+
+  <!-- STAFF (owner only) -->
+  <section class="panel" id="v-staff" role="tabpanel" aria-labelledby="tab-staff" hidden>
+    <div class="card">
+      <h2>Staff access</h2>
+      <p class="hint">New staff create an account on the Attendant or Mall security tab. Give each person the role they need here. Removing access signs them out of all staff views.</p>
+    </div>
+    <div class="tablebox"><table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Change role</th></tr></thead>
+      <tbody id="staffBody"></tbody>
+    </table></div>
   </section>
 </div>
-
 <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,69 @@
+rules_version = '2';
+
+// Parking Wash Tracker access rules.
+//  - Customers (no account) can book, read only a ticket whose private id they hold, and cancel it before work starts.
+//  - Attendants and the owner move a job forward one step at a time; starting needs a before-photo, finishing an after-photo.
+//  - Mall security can read every ticket but change nothing.
+//  - Staff roles are given by the owner on the Staff tab. New accounts start as "pending".
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function roleDoc() {
+      return /databases/$(database)/documents/roles/$(request.auth.uid);
+    }
+    function hasRole(roles) {
+      return request.auth != null && exists(roleDoc()) && get(roleDoc()).data.role in roles;
+    }
+
+    match /roles/{uid} {
+      allow read: if (request.auth != null && request.auth.uid == uid) || hasRole(['owner']);
+      // A new staff member can only register themselves as "pending".
+      allow create: if request.auth != null && request.auth.uid == uid
+                    && request.resource.data.role == 'pending'
+                    && request.resource.data.keys().hasOnly(['role', 'name', 'email', 'createdAt']);
+      // Only the owner changes roles, and never to "owner" from the app.
+      allow update: if hasRole(['owner'])
+                    && request.resource.data.role in ['pending', 'attendant', 'security', 'none']
+                    && resource.data.role != 'owner';
+      allow delete: if false;
+    }
+
+    match /tickets/{ticketId} {
+      function d() { return request.resource.data; }
+      function o() { return resource.data; }
+      function changed() { return d().diff(o()).affectedKeys(); }
+      function locked() {
+        return d().plateKey == o().plateKey && d().consent == o().consent
+            && d().bookedAt == o().bookedAt && d().phone == o().phone;
+      }
+      function step(from, to) { return o().status == from && d().status == to; }
+
+      // Reading one ticket by its private id is open; listing all tickets is staff only.
+      allow get: if true;
+      allow list: if hasRole(['attendant', 'security', 'owner']);
+
+      allow create: if (
+            d().status == 'booked' && d().consent == true
+            && d().plateKey is string && d().plateKey.size() >= 6 && d().plateKey.size() <= 12
+            && d().bay is string && d().bay.size() <= 40
+            && d().phone is string && d().phone.size() <= 20
+            && d().keys().hasOnly(['code', 'plate', 'plateKey', 'bay', 'phone', 'service', 'status', 'consent', 'bookedAt', 'alerts'])
+          ) || (hasRole(['owner']) && d().example == true);
+
+      allow update: if
+          // Customer (or anyone holding the id) cancels before work starts.
+          (step('booked', 'cancelled') && changed().hasOnly(['status', 'cancelledAt', 'alerts']))
+          ||
+          (hasRole(['attendant', 'owner']) && locked() && (
+               step('booked', 'verified')
+            || (step('verified', 'washing') && d().photos.before is string)
+            || (step('washing', 'ready') && d().photos.after is string)
+            || step('ready', 'closed')
+            // Adding or retaking a photo without changing the step.
+            || (d().status == o().status && changed().hasOnly(['photos']))
+          ));
+
+      allow delete: if hasRole(['owner']);
+    }
+  }
+}
