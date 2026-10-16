@@ -1,11 +1,13 @@
 // Business settings for the Parking Wash Tracker.
 // Edit these and the app updates; nothing else needs changing.
 export const business = {
+  // Brand name shown on receipts and the monthly report. Change once you've chosen one.
+  name: "Parking Wash",
   // Your UPI ID, for example "yourname@okhdfcbank". Leave empty to hide the "Pay by UPI" button.
   upiId: "",
   // Name shown in the customer's UPI app.
   payeeName: "Parking Wash",
-  // Price per service in rupees (sample prices for the demo; change before launch). 0 means the customer types the amount in their UPI app.
+  // Price per service in rupees (sample prices for the demo; change before launch).
   prices: {
     "Exterior eco wash": 249,
     "Interior cleaning": 299,
@@ -14,4 +16,12 @@ export const business = {
     "Tyre pressure check": 50,
     "Battery check": 100,
   },
+  // Locations. Each has a short id (letters only, used in QR links), a name, the venue's
+  // revenue share in percent, and its parking zones (one QR code per zone).
+  defaultSite: "forum",
+  sites: [
+    { id: "forum", name: "Forum Mall, Mangalore", sharePct: 15, zones: ["Level B1", "Level B2", "Ground"] },
+  ],
+  // Loyalty: every Nth paid wash for the same car gets this discount.
+  loyalty: { every: 5, discountPct: 50 },
 };

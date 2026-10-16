@@ -6,6 +6,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Parking Wash Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#10231C">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Black&family=JetBrains+Mono:wght@500&display=swap">
 <style>
@@ -158,6 +163,42 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .clearbox{border-top:1px solid var(--line);padding-top:12px}
 .clearq{font-weight:600;color:var(--danger);flex:1 1 100%}
 @media (max-width:760px){.logcards{display:flex}.logtable{display:none}}
+.zoneinfo{margin:0;font-weight:700;background:var(--s-work-bg);color:var(--s-work);padding:8px 12px}
+.st-noshow{color:var(--s-done);background:var(--s-done-bg)}
+.noshow summary{list-style:none;cursor:pointer;width:fit-content}
+.noshow summary::-webkit-details-marker{display:none}
+.noshowbox{display:flex;flex-direction:column;gap:8px;padding-top:8px}
+.loyal{margin:0;font-size:14px;background:var(--s-ready-bg);color:var(--s-ready);padding:8px 12px}
+.walkup summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.walkup[open] summary{margin-bottom:12px}
+.donelist summary{cursor:pointer}
+.donerow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.plate.sm{font-size:14px}
+.rcwrap summary{list-style:none;cursor:pointer;width:fit-content}
+.rcwrap summary::-webkit-details-marker{display:none}
+.rcwrap[open] summary{margin-bottom:10px}
+.receipt,.rep{border:1px dashed var(--muted);padding:14px;display:flex;flex-direction:column;gap:6px;background:var(--bg);max-width:460px}
+.rep{max-width:640px}
+.rc-brand{margin:0;font-family:var(--f-display);font-size:20px;text-transform:uppercase}
+table.rc{min-width:0;width:100%;font-size:14px;border-collapse:collapse}
+table.rc td{padding:6px 0;border-bottom:1px dotted var(--line)}
+.rc-total td{font-weight:700;border-top:2px solid var(--ink);border-bottom:0}
+label.inline{flex-direction:row;align-items:center;gap:8px}
+label.inline select{width:auto;min-height:40px}
+.qrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:12px}
+.qrcard{margin:0;border:1px solid var(--line);padding:10px;background:#fff;color:#10231C;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.qrcard svg{width:150px;height:150px}
+.qrcard figcaption{display:flex;flex-direction:column;gap:2px;font-size:13px}
+.qrcard a{color:#0B5A8A;font-size:12px}
+#qrSheet h4{margin:8px 0}
+@media print{
+  body.printing *{visibility:hidden}
+  body.printing[data-print="report"] #report, body.printing[data-print="report"] #report *,
+  body.printing[data-print="qrSheet"] #qrSheet, body.printing[data-print="qrSheet"] #qrSheet *{visibility:visible}
+  body.printing #report, body.printing #qrSheet{position:absolute;left:0;top:0;width:100%}
+  body.printing .noprint, body.printing .qrcard a{display:none}
+  body{background:#fff;color:#000}
+}
 .waitpay{margin:0;font-weight:600;color:var(--s-ready);background:var(--s-ready-bg);padding:10px 12px;font-size:14px}
 .pay{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:12px}
 .btn.wa{border-color:#1E6B3A;color:var(--s-ready)}
@@ -172,6 +213,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
       <p class="sub">Booking, consent and job tracking for on-site car washing · Forum Mall pilot</p>
     </div>
     <div class="who">
+      <button class="link" id="installBtn" type="button" hidden>Install app on this phone</button>
       <div class="live" id="live"><span class="dot" id="liveDot"></span><span id="liveText">Connecting…</span></div>
       <div class="row" id="whoBox" hidden>
         <span class="whoName"><b id="whoName"></b> · <span id="whoRole"></span></span>
@@ -195,6 +237,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="card">
       <h2>Book a wash for your parked car</h2>
       <p class="hint">Scan the QR code at the parking entrance to open this page. Nothing is done to your car until you book and agree below.</p>
+      <p class="zoneinfo" id="zoneInfo" hidden></p>
       <form id="bookForm" novalidate>
         <label>Car number
           <input id="f-plate" name="plate" autocomplete="off" placeholder="KA 19 MN 4821" required>
@@ -270,6 +313,21 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="card">
       <p class="hint"><b>Rules:</b> work only on booked tickets. Re-type the number plate to verify the car, then check for existing damage. The damage check and a before-photo are required to start, and an after-photo to finish.</p>
     </div>
+    <div class="card" id="shiftCard"></div>
+    <details class="card walkup" id="walkup">
+      <summary><b>+ Walk-up booking</b> <span class="hint">For customers who don’t scan the QR code</span></summary>
+      <form id="walkForm" novalidate>
+        <label>Car number<input id="w-plate" autocomplete="off" placeholder="KA 19 MN 4821"></label>
+        <label>Zone<select id="w-zone"></select></label>
+        <label>Bay<input id="w-bay" autocomplete="off" placeholder="47"></label>
+        <label>Customer WhatsApp (optional)<input id="w-phone" inputmode="tel" autocomplete="off" placeholder="98450 12345"></label>
+        <fieldset class="full svcs" id="w-services"></fieldset>
+        <p class="hint full"><b>Hand the phone to the customer</b> to read and tick this box.</p>
+        <label class="check full"><input type="checkbox" id="w-consent"><span>I am the owner or driver of this car and I authorise the attendant to clean it in this bay. Before and after photos will be taken.</span></label>
+        <p class="err full" id="walkErr" hidden></p>
+        <div class="full row"><button class="btn go" type="submit">Create booking</button></div>
+      </form>
+    </details>
     <div class="panel" id="queue"></div>
   </section>
 
@@ -297,7 +355,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
       <p class="hint">New staff create an account on the Attendant or Mall security tab. Give each person the role they need here. Removing access signs them out of all staff views.</p>
     </div>
     <div class="tablebox"><table>
-      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Change role</th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Site</th><th>Change role</th></tr></thead>
       <tbody id="staffBody"></tbody>
     </table></div>
   </section>
@@ -305,6 +363,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   <section class="panel" id="v-dash" role="tabpanel" aria-labelledby="tab-dash" hidden>
     <div class="row" style="justify-content:space-between">
       <h2>Business dashboard</h2>
+      <label class="inline" hidden>Site <select id="dashSite"></select></label>
       <div class="seg" role="group" aria-label="Date range">
         <button type="button" data-range="1" aria-pressed="false">Today</button>
         <button type="button" data-range="7" aria-pressed="true">7 days</button>
@@ -312,6 +371,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
       </div>
     </div>
     <div class="dstats" id="dashStats"></div>
+    <div class="card"><h3>Team today</h3><div class="tablebox"><table class="small">
+      <thead><tr><th>Name</th><th>Status</th><th class="num">Shift start</th><th class="num">Hours</th><th class="num">Washes today</th></tr></thead>
+      <tbody id="teamBody"></tbody></table></div></div>
+    <div class="card"><h3>Revenue per day</h3><div class="chartbox" id="revChart"></div></div>
     <div class="card"><h3>Bookings by hour</h3><div class="chartbox" id="hourChart"></div></div>
     <div class="grid2">
       <div class="card"><h3>Attendants</h3><div class="tablebox"><table class="small">
@@ -322,9 +385,18 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
         <tbody id="svcBody"></tbody></table></div></div>
     </div>
     <div class="card"><h3>Latest customer comments</h3><ul class="comments" id="comments"></ul></div>
+    <div class="card" id="reportCard"><h3>Monthly report for the venue</h3>
+      <p class="hint">A one-page summary for the mall review: washes, revenue and their share, ratings, damage notes, consent and photos.</p>
+      <div class="row"><label class="inline">Month <select id="rMonth"></select></label><label class="inline">Site <select id="rSite"></select></label><button class="btn go sm" id="rBuild" type="button">Create report</button></div>
+      <div id="report" hidden></div></div>
+    <div class="card"><div class="row" style="justify-content:space-between"><h3>Booking QR codes</h3><button class="btn alt sm" id="qrPrint" type="button">Print QR sheet</button></div>
+      <p class="hint">Put one at each parking zone. Scanning it opens the booking screen with the site and zone filled in.</p>
+      <div id="qrSheet"></div></div>
     <p class="hint">Example tickets are left out. Revenue uses the prices in settings.js.</p>
   </section>
 </div>
-<script type="module" src="app.js?v=202610161109"></script>
+<script src="qrcode.js"></script>
+<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
+<script type="module" src="app.js?v=202610161132"></script>
 </body>
 </html>

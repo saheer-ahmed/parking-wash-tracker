@@ -80,13 +80,33 @@ Customers still book without an account and only ever see their own ticket. Staf
 
 Photos are required: **Start wash** stays locked until a before-photo is taken, and **Wash complete** until an after-photo is taken. The database rules enforce this too.
 
+## Version 4: locations, walk-ups, receipts, loyalty, shifts, reports
+
+After uploading, publish the new `firestore.rules` once (Firestore → Rules → paste → Publish).
+
+**Locations and zones** live in `settings.js` (`sites`). Each site has an id, a name, the venue's revenue share and its parking zones. Existing attendants and security guards are placed at `forum`; change it on the **Staff** tab. Attendants and security only see tickets for their own site. Old test tickets made before version 4 have no site, so clear them from the dashboard.
+
+**Zone QR codes:** Dashboard → **Parking QR codes** → **Print**. Each code opens the booking page with the site and zone already filled in.
+
+**Walk-up booking:** Attendant tab → **Walk-up customer**. Ask the customer's consent, fill the car number and services, and the ticket starts as a normal booking marked "Walk-up".
+
+**Not done:** if a car isn't in the bay or the customer leaves, the attendant closes the ticket as **Not done** with a reason. It shows on the ticket, the log and the report.
+
+**Receipts:** paid tickets show a receipt. Customers can share it on WhatsApp; staff can send it from **Completed today**.
+
+**Loyalty:** every 5th paid wash for the same car gets 50% off, applied automatically when the plate is verified. Change it in `settings.js` (`loyalty`).
+
+**Shifts:** attendants tap **Start shift** / **Break** / **End shift**. The dashboard's **Team today** shows who is on, hours and jobs done.
+
+**Revenue and monthly report:** the dashboard shows revenue per day. **Monthly report** builds a summary for the mall (washes, revenue, venue share, ratings, damage, not done) that can be printed or saved as PDF, downloaded as CSV or copied.
+
+**Install on the phone:** open the site in Chrome and tap **Install app** (or menu → Add to Home screen). It opens straight to the Attendant tab.
+
 ## Before real customers use it
 
-This version is for demos and the trial. Before launch:
-
-- **Phone numbers:** with version 2, only staff can list tickets; a customer can only open a ticket whose private link their own phone holds.
-- **Real WhatsApp alerts:** alerts are shown in the app but not sent. Real alerts need the WhatsApp Business API through a provider.
-- **Payments:** connect a UPI payment link or gateway instead of the "payment received" button.
+- **Real WhatsApp alerts:** alerts are prepared in the app and opened in WhatsApp; sending them automatically needs the WhatsApp Business API through a provider.
+- **Payments:** the Pay button is a demo. Before launch, add your UPI ID in `settings.js` or connect a payment gateway.
+- **Prices:** the prices in `settings.js` are samples.
 
 ## Free limits
 

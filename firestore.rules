@@ -8,6 +8,10 @@ service cloud.firestore {
     function hasRole(roles) {
       return request.auth != null && exists(roleDoc()) && get(roleDoc()).data.role in roles;
     }
+    // The site a staff member works at (the owner sees every site).
+    function userSite() {
+      return get(roleDoc()).data.get('site', 'forum');
+    }
 
     match /roles/{uid} {
       allow read: if (request.auth != null && request.auth.uid == uid) || hasRole(['owner']);
@@ -16,7 +20,8 @@ service cloud.firestore {
                     && request.resource.data.keys().hasOnly(['role', 'name', 'email', 'createdAt']);
       allow update: if hasRole(['owner'])
                     && request.resource.data.role in ['pending', 'attendant', 'security', 'none']
-                    && resource.data.role != 'owner';
+                    && resource.data.role != 'owner'
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'site', 'changedAt']);
       allow delete: if false;
     }
 
@@ -33,47 +38,69 @@ service cloud.firestore {
         return d().rating is int && d().rating >= 1 && d().rating <= 5
             && (!('ratingComment' in d()) || (d().ratingComment is string && d().ratingComment.size() <= 300));
       }
-
-      allow get: if true;
-      allow list: if hasRole(['attendant', 'security', 'owner']);
-
-      allow create: if (
-            d().status == 'booked' && d().consent == true
+      function goodBooking() {
+        return d().status == 'booked' && d().consent == true
             && d().plateKey is string && d().plateKey.size() >= 6 && d().plateKey.size() <= 12
             && d().bay is string && d().bay.size() <= 40
             && d().phone is string && d().phone.size() <= 20
-            && d().keys().hasOnly(['code', 'plate', 'plateKey', 'bay', 'phone', 'service', 'status', 'consent', 'bookedAt', 'alerts'])
-          ) || (hasRole(['owner']) && d().example == true);
+            && d().get('site', 'forum') is string && d().get('site', 'forum').size() <= 40;
+      }
+      function staffHere() {
+        return hasRole(['owner']) || (hasRole(['attendant']) && o().get('site', 'forum') == userSite());
+      }
+
+      // Reading one ticket by its private id is open; listing is staff only, and only for their own site.
+      allow get: if true;
+      allow list: if hasRole(['owner'])
+                  || (hasRole(['attendant', 'security']) && resource.data.site == userSite());
+
+      allow create: if
+          // Customer books from the QR code.
+          (goodBooking() && d().keys().hasOnly(['code', 'plate', 'plateKey', 'bay', 'phone', 'service', 'site', 'zone', 'day', 'status', 'consent', 'bookedAt', 'alerts']))
+          ||
+          // Attendant books a walk-up customer at their own site.
+          (goodBooking() && hasRole(['attendant', 'owner']) && d().walkUp == true && d().createdBy == request.auth.uid
+            && (hasRole(['owner']) || d().site == userSite())
+            && d().keys().hasOnly(['code', 'plate', 'plateKey', 'bay', 'phone', 'service', 'site', 'zone', 'day', 'status', 'consent', 'bookedAt', 'alerts', 'walkUp', 'createdBy']))
+          ||
+          (hasRole(['owner']) && d().example == true);
 
       allow update: if
-          // Customer cancels before work starts.
           (step('booked', 'cancelled') && changed().hasOnly(['status', 'cancelledAt', 'alerts']))
           ||
-          // Customer pays for a ready car (demo payment).
           (step('ready', 'closed') && changed().hasOnly(['status', 'paidAt', 'paidVia', 'alerts']))
           ||
-          // Customer rates a finished wash, once.
           (o().status == 'closed' && d().status == 'closed' && !('rating' in o())
             && changed().hasOnly(['rating', 'ratingComment', 'ratedAt']) && goodRating())
           ||
-          // Staff move the job forward one step at a time.
-          (hasRole(['attendant', 'owner']) && locked() && (
+          (staffHere() && locked() && (
                step('booked', 'verified')
             || (step('verified', 'washing') && 'before' in d().photos && d().damage is map)
             || (step('washing', 'ready') && 'after' in d().photos)
             || step('ready', 'closed')
+            || ((step('booked', 'noshow') || step('verified', 'noshow')) && d().noshowReason is string && d().noshowReason.size() <= 100)
             || (d().status == o().status && changed().hasOnly(['photos', 'damage']))
           ));
 
       allow delete: if hasRole(['owner']);
     }
 
-    // Photos are kept apart from tickets so ticket lists stay small.
     match /ticketPhotos/{ticketId} {
       allow get: if true;
       allow list: if false;
       allow create, update: if hasRole(['attendant', 'owner'])
                     && request.resource.data.keys().hasOnly(['before', 'after', 'damage']);
+      allow delete: if hasRole(['owner']);
+    }
+
+    // Attendant shifts: one document per person per day, id "<uid>_<YYYY-MM-DD>".
+    match /shifts/{shiftId} {
+      allow read: if hasRole(['owner']) || (request.auth != null && shiftId.matches(request.auth.uid + '_.*'));
+      allow create, update: if hasRole(['attendant', 'owner'])
+                    && request.resource.data.uid == request.auth.uid
+                    && shiftId == request.auth.uid + '_' + request.resource.data.day
+                    && request.resource.data.keys().hasOnly(['uid', 'name', 'site', 'day', 'sessions'])
+                    && request.resource.data.sessions is list && request.resource.data.sessions.size() <= 20;
       allow delete: if hasRole(['owner']);
     }
   }
