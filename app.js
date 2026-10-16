@@ -6,7 +6,7 @@ import { firebaseConfig } from './firebase-config.js';
 import { business } from './settings.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
-  getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, limit,
+  getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, limit, where,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
@@ -28,7 +28,9 @@ const STEPS = [
 const ORDER = { booked: 0, verified: 1, washing: 2, ready: 3, closed: 4, cancelled: -1 };
 const LABEL = { booked: 'Waiting', verified: 'Verified', washing: 'Washing', ready: 'Ready', closed: 'Paid', cancelled: 'Cancelled' };
 const ROLE_LABEL = { owner: 'Owner', attendant: 'Attendant', security: 'Mall security', pending: 'Waiting for approval', none: 'No access' };
-const ALLOW = { attendant: ['attendant', 'owner'], security: ['security', 'owner'], staff: ['owner'] };
+const ALLOW = { attendant: ['attendant', 'owner'], security: ['security', 'owner'], staff: ['owner'], dash: ['owner'] };
+// How many days of tickets each role loads.
+const WINDOW_DAYS = { attendant: 2, security: 1, owner: 31 };
 
 // ---- state
 let user = null, profile = null;
@@ -37,6 +39,9 @@ const myTickets = new Map();      // customer view: only this device's tickets
 let staff = [];
 let current = 'customer';
 let detailId = null;
+let dashRange = 7;
+const photoData = new Map();   // ticket id -> { before, after, damage } images
+const photoSubs = new Map();
 const unsubs = { profile: null, tickets: null, staff: null, mine: new Map() };
 
 // ---- per-device conveniences
@@ -99,7 +104,7 @@ function upiLink(tk) {
 const findTicket = id => tickets.find(x => x.id === id) || (myTickets.has(id) ? { id, ...myTickets.get(id) } : null);
 
 // ---- tabs and access
-const TABS = ['customer', 'attendant', 'security', 'staff'];
+const TABS = ['customer', 'attendant', 'security', 'staff', 'dash'];
 function show(name) {
   current = name;
   TABS.forEach(n => $('#tab-' + n).setAttribute('aria-selected', String(n === name)));
@@ -128,6 +133,7 @@ function refreshWho() {
     $('#whoRole').textContent = ROLE_LABEL[role()] || role();
   }
   $('#tab-staff').hidden = role() !== 'owner';
+  $('#tab-dash').hidden = role() !== 'owner';
   $('#exBtn').hidden = role() !== 'owner';
 }
 
@@ -242,7 +248,9 @@ function startStaffFeeds() {
   ['tickets', 'staff'].forEach(k => { if (unsubs[k]) { unsubs[k](); unsubs[k] = null; } });
   tickets = []; staff = [];
   if (['attendant', 'security', 'owner'].includes(role())) {
-    unsubs.tickets = onSnapshot(query(collection(fs, 'tickets'), orderBy('bookedAt', 'desc'), limit(300)), snap => {
+    const days = WINDOW_DAYS[role()] || 1;
+    const since = new Date(); since.setHours(0, 0, 0, 0); since.setDate(since.getDate() - (days - 1));
+    unsubs.tickets = onSnapshot(query(collection(fs, 'tickets'), where('bookedAt', '>=', since.toISOString()), orderBy('bookedAt', 'desc'), limit(2000)), snap => {
       tickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       renderStaffViews();
     }, () => { $('#offline').hidden = false; });
@@ -263,6 +271,12 @@ async function act(id, action, extra) {
   const by = profile?.name || 'Staff';
   if (action === 'cancel') {
     Object.assign(patch, { status: 'cancelled', cancelledAt: now(), alerts: addAlert(tk, 'Booking cancelled') });
+  } else if (action === 'rate') {
+    const r = Number(extra?.rating || 0);
+    if (tk.status !== 'closed' || tk.rating) return '';
+    if (r < 1 || r > 5) return 'Tap a star to choose your rating.';
+    const c = String(extra?.comment || '').trim().slice(0, 300);
+    Object.assign(patch, { rating: r, ratedAt: now(), ...(c ? { ratingComment: c } : {}) });
   } else if (action === 'pay') {
     if (tk.status !== 'ready') return 'Payment opens when your car is ready.';
     Object.assign(patch, { status: 'closed', paidAt: now(), paidVia: 'Customer (demo)', alerts: addAlert(tk, 'Payment received. Ticket closed. Thank you!') });
@@ -272,9 +286,17 @@ async function act(id, action, extra) {
       if (norm(extra) !== tk.plateKey) return 'Car number doesn’t match the booking. Don’t start; check the bay with the customer.';
       Object.assign(patch, { status: 'verified', verifiedAt: now(), attendant: by, attendantUid: user.uid, alerts: addAlert(tk, `Car verified by ${by}`) });
     }
+    if (action === 'nodamage') Object.assign(patch, { damage: { found: false, at: now(), by } });
+    if (action === 'damage') {
+      const note = String(extra || '').trim();
+      if (!note) return 'Describe the damage, for example “Scratch on rear bumper, left side”.';
+      Object.assign(patch, { damage: { found: true, note: note.slice(0, 200), at: now(), by } });
+    }
+    if (action === 'redodamage') Object.assign(patch, { damage: null });
     if (action === 'start') {
+      if (!tk.damage) return 'Do the existing-damage check first.';
       if (!tk.photos?.before) return 'Take the before-photo first.';
-      Object.assign(patch, { status: 'washing', startedAt: now(), alerts: addAlert(tk, 'Wash started. Before-photo taken') });
+      Object.assign(patch, { status: 'washing', startedAt: now(), alerts: addAlert(tk, tk.damage.found ? `Wash started. Existing damage noted before starting: ${tk.damage.note}` : 'Wash started. Before-photo taken, no existing damage found') });
     }
     if (action === 'done') {
       if (!tk.photos?.after) return 'Take the after-photo first.';
@@ -302,14 +324,35 @@ function shrink(file, max = 480) {
     img.src = url;
   });
 }
+// Images live in ticketPhotos/{id}; the ticket only keeps a flag and a time, so lists stay small and fast.
 async function addPhoto(id, kind, file) {
   if (!file) return '';
   try {
     const data = await shrink(file);
     const tk = findTicket(id);
-    await updateDoc(doc(fs, 'tickets', id), { photos: { ...(tk.photos || {}), [kind]: data, [kind + 'At']: now() } });
+    await setDoc(doc(fs, 'ticketPhotos', id), { [kind]: data }, { merge: true });
+    photoData.set(id, { ...(photoData.get(id) || {}), [kind]: data });
+    await updateDoc(doc(fs, 'tickets', id), { photos: { ...(tk.photos || {}), [kind]: true, [kind + 'At']: now() } });
     return '';
   } catch { return 'Photo didn’t save. Try again or take a new photo.'; }
+}
+function ensurePhotos(id) {
+  if (photoSubs.has(id) || photoSubs.size > 60) return;
+  photoSubs.set(id, onSnapshot(doc(fs, 'ticketPhotos', id), snap => {
+    photoData.set(id, snap.exists() ? snap.data() : {});
+    rerender();
+  }, () => {}));
+}
+let rerenderQueued = false;
+function rerender() {
+  if (rerenderQueued) return; rerenderQueued = true;
+  requestAnimationFrame(() => { rerenderQueued = false; renderCustomer(); renderStaffViews(); });
+}
+function getPhoto(tk, kind) {
+  const v = tk.photos?.[kind];
+  if (typeof v === 'string') return safeImg(v);          // older tickets kept the image inline
+  if (v === true) { ensurePhotos(tk.id); return safeImg(photoData.get(tk.id)?.[kind]); }
+  return '';
 }
 
 // ---- rendering
@@ -322,9 +365,27 @@ function stepsHTML(tk) {
 const safeImg = v => typeof v === 'string' && v.startsWith('data:image/jpeg;base64,') ? v : '';
 function photosHTML(tk) {
   const p = tk.photos || {}; const out = [];
-  if (safeImg(p.before)) out.push(`<figure><img src="${safeImg(p.before)}" alt="Before wash, ${esc(tk.plate)}">Before · ${t(p.beforeAt)}</figure>`);
-  if (safeImg(p.after)) out.push(`<figure><img src="${safeImg(p.after)}" alt="After wash, ${esc(tk.plate)}">After · ${t(p.afterAt)}</figure>`);
+  const fig = (kind, label) => {
+    if (!p[kind]) return;
+    const src = getPhoto(tk, kind);
+    out.push(src ? `<figure><img src="${src}" alt="${label}, ${esc(tk.plate)}">${label} · ${t(p[kind + 'At'])}</figure>`
+                 : `<figure><span class="ph">Loading…</span>${label} · ${t(p[kind + 'At'])}</figure>`);
+  };
+  fig('before', 'Before'); fig('after', 'After');
   return out.length ? `<div class="photos">${out.join('')}</div>` : '';
+}
+function damageHTML(tk, forCustomer) {
+  const d = tk.damage; if (!d) return '';
+  if (!d.found) return `<p class="dmg ok">Pre-wash check: no existing damage found${d.by ? ' by ' + esc(d.by) : ''} · ${t(d.at)}</p>`;
+  const src = tk.photos?.damage ? getPhoto(tk, 'damage') : '';
+  return `<div class="dmg found"><b>${forCustomer ? 'Existing damage noted before the wash' : 'Existing damage noted'}</b>
+    <span>${esc(d.note)}</span><span class="hint">${d.by ? 'Recorded by ' + esc(d.by) + ' · ' : ''}${t(d.at)}</span>
+    ${src ? `<div class="photos"><figure><img src="${src}" alt="Existing damage, ${esc(tk.plate)}">Damage photo</figure></div>` : ''}</div>`;
+}
+const stars = n => '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
+function ratingHTML(tk) {
+  if (!tk.rating) return '';
+  return `<p class="rated"><span class="stars" aria-label="${tk.rating} out of 5">${stars(tk.rating)}</span>${tk.ratingComment ? ' “' + esc(tk.ratingComment) + '”' : ''}</p>`;
 }
 function headHTML(tk, showPhone) {
   const st = LABEL[tk.status] ? tk.status : 'booked';
@@ -342,10 +403,17 @@ function renderCustomer() {
   const list = mine.filter(id => myTickets.has(id)).map(id => ({ id, ...myTickets.get(id) }));
   if (!list.length) { box.innerHTML = '<div class="empty">Your ticket appears here after you book, with live updates as the attendant works on your car.</div>'; return; }
   box.innerHTML = list.map(tk => `<article class="card" data-id="${esc(tk.id)}">
-    <h3>Your ticket</h3>${headHTML(tk, false)}${stepsHTML(tk)}${photosHTML(tk)}${alertsHTML(tk)}
+    <h3>Your ticket</h3>${headHTML(tk, false)}${stepsHTML(tk)}${damageHTML(tk, true)}${photosHTML(tk)}${alertsHTML(tk)}
     ${tk.status === 'booked' ? '<div class="row"><button class="btn warn" data-act="cancel">Cancel booking</button></div>' : ''}
     ${tk.status === 'ready' ? payHTML(tk) : ''}
+    ${tk.status === 'closed' ? (tk.rating ? `<div class="pay"><h3>Thanks for your rating</h3>${ratingHTML(tk)}</div>` : rateHTML()) : ''}
     <p class="err" hidden></p></article>`).join('');
+}
+function rateHTML() {
+  return `<div class="pay rate"><h3>How was your wash?</h3>
+    <div class="starpick" role="group" aria-label="Rating">${[1, 2, 3, 4, 5].map(n => `<button type="button" class="star" data-rate="${n}" aria-label="${n} star${n > 1 ? 's' : ''}" aria-pressed="false">★</button>`).join('')}</div>
+    <label>Comment (optional)<input class="rcomment" maxlength="300" placeholder="Anything we should know?"></label>
+    <div class="row"><button class="btn go" data-act="rate">Send rating</button></div></div>`;
 }
 function payHTML(tk) {
   const amt = price(tk) ? ` ₹${price(tk)}` : '';
@@ -364,12 +432,21 @@ function renderQueue() {
     const p = tk.photos || {};
     let actions = '';
     if (tk.status === 'booked') actions = `<div class="verify"><label>Car number on the plate<input class="vplate" autocomplete="off" placeholder="Type what you see"></label><button class="btn go" data-act="verify">Verify car</button></div>`;
-    if (tk.status === 'verified') actions = `<div class="row">${photoBtn('before', !!p.before)}<button class="btn ${p.before ? 'go' : 'alt'}" data-act="start" ${p.before ? '' : 'disabled'}>Start wash</button></div>${p.before ? '' : '<p class="hint">Take the before-photo to unlock Start wash.</p>'}`;
+    if (tk.status === 'verified') {
+      const dmg = tk.damage
+        ? `${damageHTML(tk, false)}<div class="row"><button class="link" data-act="redodamage">Change damage check</button></div>`
+        : `<div class="dmgcheck"><h3>1. Existing damage check</h3><p class="hint">Walk around the car before touching it. Record any scratch, dent or crack that is already there.</p>
+           <div class="row"><button class="btn alt" data-act="nodamage">No existing damage</button></div>
+           <label>Or describe the damage<input class="dmgnote" maxlength="200" placeholder="Scratch on rear bumper, left side"></label>
+           <div class="row"><label class="btn alt">${p.damage ? 'Retake' : 'Add'} damage photo<input type="file" accept="image/*" capture="environment" data-photo="damage" hidden></label><button class="btn alt" data-act="damage">Save damage note</button></div></div>`;
+      const ready = !!(tk.damage && p.before);
+      actions = `${dmg}<h3>2. Before-photo and start</h3><div class="row">${photoBtn('before', !!p.before)}<button class="btn ${ready ? 'go' : 'alt'}" data-act="start" ${ready ? '' : 'disabled'}>Start wash</button></div>${ready ? '' : `<p class="hint">${tk.damage ? '' : 'Do the damage check and '}${p.before ? '' : 'take the before-photo '}to unlock Start wash.</p>`}`;
+    }
     if (tk.status === 'washing') actions = `<div class="row">${photoBtn('after', !!p.after)}<button class="btn ${p.after ? 'go' : 'alt'}" data-act="done" ${p.after ? '' : 'disabled'}>Wash complete</button></div>${p.after ? '' : '<p class="hint">Take the after-photo to unlock Wash complete.</p>'}`;
     if (tk.status === 'ready') actions = `<p class="waitpay">Waiting for the customer to pay on their ticket. This job closes by itself once they tap Pay.</p><div class="row"><button class="link" data-act="paid">Customer paid in cash instead</button></div>`;
     const wa = waLink(tk);
     const waBtn = wa ? `<a class="btn alt wa" href="${esc(wa)}" target="_blank" rel="noopener">Send WhatsApp update</a><span class="hint">Opens WhatsApp with the message ready. Tap send.</span>` : '';
-    return `<article class="card" data-id="${esc(tk.id)}">${headHTML(tk, true)}${stepsHTML(tk)}${photosHTML(tk)}${actions}${waBtn ? `<div class="row">${waBtn}</div>` : ''}<p class="err" hidden></p></article>`;
+    return `<article class="card" data-id="${esc(tk.id)}">${headHTML(tk, true)}${stepsHTML(tk)}${tk.status !== 'verified' ? damageHTML(tk, false) : ''}${photosHTML(tk)}${actions}${waBtn ? `<div class="row">${waBtn}</div>` : ''}<p class="err" hidden></p></article>`;
   }).join('');
 }
 
@@ -384,13 +461,13 @@ function renderSecurity() {
     const ph = (tk.photos?.before ? 'Before' : '') + (tk.photos?.before && tk.photos?.after ? ' + ' : '') + (tk.photos?.after ? 'After' : '');
     return `<tr>
     <td class="t"><button class="link mono" data-detail="${esc(tk.id)}">${esc(code(tk))}</button>${tk.example ? ' <span class="ex">Ex</span>' : ''}</td><td class="t">${esc(tk.plate)}</td><td>${esc(tk.bay)}</td><td>${esc(tk.service)}</td>
-    <td><span class="chip st-${st}">${LABEL[st]}</span></td><td>${esc(tk.attendant || '–')}</td><td>${ph || '–'}</td>
+    <td><span class="chip st-${st}">${LABEL[st]}</span></td><td>${esc(tk.attendant || '–')}</td><td>${ph || '–'}</td><td>${tk.damage ? (tk.damage.found ? '<b class="dmgflag">Noted</b>' : 'None') : '–'}</td><td>${tk.rating ? `<span class="stars" aria-label="${tk.rating} out of 5">${stars(tk.rating)}</span>` : '–'}</td>
     <td class="t">${t(tk.bookedAt)}</td><td class="t">${t(tk.verifiedAt)}</td><td class="t">${t(tk.startedAt)}</td><td class="t">${t(tk.completedAt)}</td><td class="t">${t(tk.paidAt)}</td></tr>`;
   }).join('')
-    : '<tr><td colspan="12"><div class="empty">No jobs logged today. Each booking appears here with every step timed.</div></td></tr>';
+    : '<tr><td colspan="14"><div class="empty">No jobs logged today. Each booking appears here with every step timed.</div></td></tr>';
   const d = detailId && tickets.find(x => x.id === detailId);
   $('#detail').innerHTML = d ? `<article class="card"><div class="row" style="justify-content:space-between"><h3>Ticket ${esc(code(d))}</h3><button class="link" data-detail="">Close</button></div>
-    ${headHTML(d, true)}${stepsHTML(d)}${photosHTML(d) || '<p class="hint">No photos yet.</p>'}${alertsHTML(d)}</article>` : '';
+    ${headHTML(d, true)}${stepsHTML(d)}${damageHTML(d, false)}${photosHTML(d) || '<p class="hint">No photos yet.</p>'}${ratingHTML(d)}${alertsHTML(d)}</article>` : '';
 }
 
 function renderStaff() {
@@ -407,7 +484,83 @@ function renderStaff() {
   }).join('');
 }
 
-function renderStaffViews() { renderQueue(); renderSecurity(); renderStaff(); }
+function renderStaffViews() { renderQueue(); renderSecurity(); renderStaff(); renderDash(); }
+
+// ---- owner dashboard
+const mins = (a, b) => (a && b) ? (new Date(b) - new Date(a)) / 60000 : null;
+const avg = xs => { const v = xs.filter(x => x != null && isFinite(x)); return v.length ? v.reduce((p, c) => p + c, 0) / v.length : null; };
+const fmtMin = m => m == null ? '–' : m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)} h ${Math.round(m % 60)} min`;
+const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
+
+function renderDash() {
+  const box = $('#v-dash'); if (!box || role() !== 'owner') return;
+  document.querySelectorAll('[data-range]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.range) === dashRange)));
+  const from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - (dashRange - 1));
+  const list = tickets.filter(x => !x.example && x.bookedAt && new Date(x.bookedAt) >= from);
+  const closed = list.filter(x => x.status === 'closed');
+  const priced = Object.values(business.prices || {}).some(v => Number(v) > 0);
+  const revenue = closed.reduce((s, x) => s + price(x), 0);
+  const rated = closed.filter(x => x.rating);
+  const avgRating = avg(rated.map(x => x.rating));
+  const tiles = [
+    ['Washes completed', String(closed.length), `${list.length} booked`],
+    ['Revenue', priced ? inr(revenue) : '–', priced ? 'From paid tickets' : 'Add prices in settings.js'],
+    ['Average wash time', fmtMin(avg(closed.map(x => mins(x.startedAt, x.completedAt)))), 'Start to finish'],
+    ['Average wait', fmtMin(avg(closed.map(x => mins(x.bookedAt, x.startedAt)))), 'Booking to start'],
+    ['Customer rating', avgRating == null ? '–' : avgRating.toFixed(1) + ' / 5', `${rated.length} rating${rated.length === 1 ? '' : 's'}`],
+    ['Damage found before wash', String(list.filter(x => x.damage?.found).length), `${list.filter(x => x.status === 'cancelled').length} cancelled`],
+  ];
+  $('#dashStats').innerHTML = tiles.map(([l, v, s]) => `<div class="stat"><span>${l}</span><b>${v}</b><small>${s}</small></div>`).join('');
+
+  // Bookings by hour of day
+  const counts = Array(24).fill(0);
+  list.forEach(x => { counts[new Date(x.bookedAt).getHours()]++; });
+  const used = counts.map((c, h) => c ? h : null).filter(h => h != null);
+  const h0 = Math.min(8, ...used), h1 = Math.max(21, ...used);
+  const hours = []; for (let h = h0; h <= h1; h++) hours.push(h);
+  const max = Math.max(1, ...counts);
+  const step = max <= 4 ? 1 : max <= 10 ? 2 : Math.ceil(max / 5);
+  const top = Math.ceil(max / step) * step;
+  const W = 640, H = 260, L = 44, R = 8, T = 14, B = 36;
+  const bw = (W - L - R) / hours.length;
+  const y = v => T + (H - T - B) * (1 - v / top);
+  let svg = '';
+  for (let v = 0; v <= top; v += step) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" class="ax">${v}</text>`;
+  hours.forEach((h, i) => {
+    const c = counts[h], x = L + i * bw + 2, w = Math.max(2, bw - 4);
+    const label = `${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00 · ${c} booking${c === 1 ? '' : 's'}`;
+    if (c) {
+      const yy = y(c), hh = H - B - yy, r = Math.min(4, w / 2, hh);
+      svg += `<path class="bar" d="M${x},${H - B} V${yy + r} Q${x},${yy} ${x + r},${yy} H${x + w - r} Q${x + w},${yy} ${x + w},${yy + r} V${H - B} Z"><title>${label}</title></path>`;
+    }
+    svg += `<rect x="${L + i * bw}" y="${T}" width="${bw}" height="${H - T - B}" class="hit"><title>${label}</title></rect>`;
+    if ((h - h0) % 2 === 0) svg += `<text x="${L + i * bw + bw / 2}" y="${H - 8}" text-anchor="middle" class="ax">${h}:00</text>`;
+  });
+  svg += `<line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" class="base"/>`;
+  $('#hourChart').innerHTML = list.length
+    ? `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Bookings by hour of day">${svg}</svg><p class="hint">Hour of day the car was booked. Hover or tap a bar for the count.</p>`
+    : '<div class="empty">No bookings in this period yet.</div>';
+
+  // Attendants
+  const byAtt = new Map();
+  closed.forEach(x => { const k = x.attendant || '–'; if (!byAtt.has(k)) byAtt.set(k, []); byAtt.get(k).push(x); });
+  $('#attBody').innerHTML = byAtt.size ? [...byAtt].sort((a, b) => b[1].length - a[1].length).map(([n, xs]) => {
+    const r = avg(xs.map(x => x.rating));
+    return `<tr><td>${esc(n)}</td><td class="num">${xs.length}</td><td class="num">${fmtMin(avg(xs.map(x => mins(x.startedAt, x.completedAt))))}</td><td class="num">${r == null ? '–' : r.toFixed(1)}</td><td class="num">${xs.filter(x => x.damage?.found).length}</td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="hint">No completed washes yet.</td></tr>';
+
+  // Services
+  const bySvc = new Map();
+  closed.forEach(x => { bySvc.set(x.service, (bySvc.get(x.service) || 0) + 1); });
+  $('#svcBody').innerHTML = bySvc.size ? [...bySvc].sort((a, b) => b[1] - a[1]).map(([sv, c]) =>
+    `<tr><td>${esc(sv)}</td><td class="num">${c}</td><td class="num">${priced ? inr(c * Number(business.prices?.[sv] || 0)) : '–'}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="hint">No completed washes yet.</td></tr>';
+
+  // Comments
+  const cm = rated.filter(x => x.ratingComment).sort((a, b) => (b.ratedAt || '').localeCompare(a.ratedAt || '')).slice(0, 8);
+  $('#comments').innerHTML = cm.length ? cm.map(x => `<li><span class="stars" aria-label="${x.rating} out of 5">${stars(x.rating)}</span> “${esc(x.ratingComment)}” <span class="hint">${esc(x.plate)} · ${new Date(x.ratedAt).toLocaleDateString([], { day: 'numeric', month: 'short' })}</span></li>`).join('')
+    : '<li class="hint">Customer comments appear here after they rate a wash.</li>';
+}
 
 // ---- delegated events
 document.addEventListener('click', async e => {
@@ -419,11 +572,22 @@ document.addEventListener('click', async e => {
     try { await updateDoc(doc(fs, 'roles', rb.dataset.uid), { role: rb.dataset.role, changedAt: now() }); } catch {}
     rb.disabled = false; return;
   }
+  const star = e.target.closest('[data-rate]');
+  if (star) {
+    const card = star.closest('[data-id]'); card.dataset.rating = star.dataset.rate;
+    card.querySelectorAll('[data-rate]').forEach(s => s.setAttribute('aria-pressed', String(Number(s.dataset.rate) <= Number(star.dataset.rate))));
+    return;
+  }
+  const rg = e.target.closest('[data-range]');
+  if (rg) { dashRange = Number(rg.dataset.range); renderDash(); return; }
   const b = e.target.closest('[data-act]'); if (!b) return;
   const card = b.closest('[data-id]'); const id = card.dataset.id;
   const errEl = card.querySelector('.err');
   b.disabled = true;
-  const extra = b.dataset.act === 'verify' ? card.querySelector('.vplate').value : undefined;
+  const a = b.dataset.act;
+  const extra = a === 'verify' ? card.querySelector('.vplate').value
+    : a === 'damage' ? card.querySelector('.dmgnote').value
+    : a === 'rate' ? { rating: card.dataset.rating, comment: card.querySelector('.rcomment')?.value } : undefined;
   const msg = await act(id, b.dataset.act, extra);
   b.disabled = false;
   if (msg && errEl) { errEl.textContent = msg; errEl.hidden = false; }
@@ -437,10 +601,10 @@ document.addEventListener('change', async e => {
 
 // ---- download today's log
 $('#dlBtn').addEventListener('click', () => {
-  const rows = [['Ticket', 'Car', 'Bay', 'Service', 'Status', 'Attendant', 'Before photo', 'After photo', 'Booked', 'Verified', 'Started', 'Completed', 'Paid', 'Paid via', 'Consent']];
+  const rows = [['Ticket', 'Car', 'Bay', 'Service', 'Status', 'Attendant', 'Before photo', 'After photo', 'Booked', 'Verified', 'Started', 'Completed', 'Paid', 'Paid via', 'Existing damage', 'Damage note', 'Rating', 'Comment', 'Consent']];
   tickets.filter(x => today(x.bookedAt)).forEach(tk => rows.push([code(tk), tk.plate, tk.bay, tk.service, LABEL[tk.status] || tk.status, tk.attendant || '',
     tk.photos?.before ? 'Yes' : 'No', tk.photos?.after ? 'Yes' : 'No',
-    tk.bookedAt || '', tk.verifiedAt || '', tk.startedAt || '', tk.completedAt || '', tk.paidAt || '', tk.paidVia || '', tk.consent ? 'Yes' : 'No']));
+    tk.bookedAt || '', tk.verifiedAt || '', tk.startedAt || '', tk.completedAt || '', tk.paidAt || '', tk.paidVia || '', tk.damage ? (tk.damage.found ? 'Yes' : 'No') : '', tk.damage?.note || '', tk.rating || '', tk.ratingComment || '', tk.consent ? 'Yes' : 'No']));
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));

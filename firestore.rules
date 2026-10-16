@@ -1,10 +1,4 @@
 rules_version = '2';
-
-// Parking Wash Tracker access rules.
-//  - Customers (no account) can book, read only a ticket whose private id they hold, and cancel it before work starts.
-//  - Attendants and the owner move a job forward one step at a time; starting needs a before-photo, finishing an after-photo.
-//  - Mall security can read every ticket but change nothing.
-//  - Staff roles are given by the owner on the Staff tab. New accounts start as "pending".
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -17,11 +11,9 @@ service cloud.firestore {
 
     match /roles/{uid} {
       allow read: if (request.auth != null && request.auth.uid == uid) || hasRole(['owner']);
-      // A new staff member can only register themselves as "pending".
       allow create: if request.auth != null && request.auth.uid == uid
                     && request.resource.data.role == 'pending'
                     && request.resource.data.keys().hasOnly(['role', 'name', 'email', 'createdAt']);
-      // Only the owner changes roles, and never to "owner" from the app.
       allow update: if hasRole(['owner'])
                     && request.resource.data.role in ['pending', 'attendant', 'security', 'none']
                     && resource.data.role != 'owner';
@@ -37,8 +29,11 @@ service cloud.firestore {
             && d().bookedAt == o().bookedAt && d().phone == o().phone;
       }
       function step(from, to) { return o().status == from && d().status == to; }
+      function goodRating() {
+        return d().rating is int && d().rating >= 1 && d().rating <= 5
+            && (!('ratingComment' in d()) || (d().ratingComment is string && d().ratingComment.size() <= 300));
+      }
 
-      // Reading one ticket by its private id is open; listing all tickets is staff only.
       allow get: if true;
       allow list: if hasRole(['attendant', 'security', 'owner']);
 
@@ -51,21 +46,34 @@ service cloud.firestore {
           ) || (hasRole(['owner']) && d().example == true);
 
       allow update: if
-          // Customer (or anyone holding the id) cancels before work starts.
+          // Customer cancels before work starts.
           (step('booked', 'cancelled') && changed().hasOnly(['status', 'cancelledAt', 'alerts']))
           ||
-          // Customer marks a ready car as paid (demo payment).
+          // Customer pays for a ready car (demo payment).
           (step('ready', 'closed') && changed().hasOnly(['status', 'paidAt', 'paidVia', 'alerts']))
           ||
+          // Customer rates a finished wash, once.
+          (o().status == 'closed' && d().status == 'closed' && !('rating' in o())
+            && changed().hasOnly(['rating', 'ratingComment', 'ratedAt']) && goodRating())
+          ||
+          // Staff move the job forward one step at a time.
           (hasRole(['attendant', 'owner']) && locked() && (
                step('booked', 'verified')
-            || (step('verified', 'washing') && d().photos.before is string)
-            || (step('washing', 'ready') && d().photos.after is string)
+            || (step('verified', 'washing') && 'before' in d().photos && d().damage is map)
+            || (step('washing', 'ready') && 'after' in d().photos)
             || step('ready', 'closed')
-            // Adding or retaking a photo without changing the step.
-            || (d().status == o().status && changed().hasOnly(['photos']))
+            || (d().status == o().status && changed().hasOnly(['photos', 'damage']))
           ));
 
+      allow delete: if hasRole(['owner']);
+    }
+
+    // Photos are kept apart from tickets so ticket lists stay small.
+    match /ticketPhotos/{ticketId} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if hasRole(['attendant', 'owner'])
+                    && request.resource.data.keys().hasOnly(['before', 'after', 'damage']);
       allow delete: if hasRole(['owner']);
     }
   }

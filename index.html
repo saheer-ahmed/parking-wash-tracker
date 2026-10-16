@@ -107,6 +107,37 @@ td.t{font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums;
 .ok{color:var(--s-ready);font-size:14px;font-weight:600;margin:0}
 .btn.sm{padding:6px 10px;min-height:36px;font-size:13px}
 a.btn{display:inline-flex;align-items:center;text-decoration:none}
+.dmg{margin:0;padding:10px 12px;font-size:14px;display:flex;flex-direction:column;gap:4px}
+.dmg.ok{background:var(--s-ready-bg);color:var(--s-ready);font-weight:600}
+.dmg.found{background:var(--s-wait-bg);color:var(--ink);border-left:4px solid var(--s-wait)}
+.dmgflag{color:var(--s-wait)}
+.dmgcheck{display:flex;flex-direction:column;gap:10px;border:1px dashed var(--line);padding:12px}
+.ph{display:flex;align-items:center;justify-content:center;width:120px;height:90px;border:1px solid var(--line);font-size:12px}
+.stars{color:#C98A00;letter-spacing:2px}
+.rated{margin:0}
+.starpick{display:flex;gap:4px}
+.star{font-size:30px;line-height:1;width:44px;height:44px;border:0;background:none;color:var(--line);cursor:pointer}
+.star[aria-pressed="true"]{color:#C98A00}
+.seg{display:flex;border:2px solid var(--ink)}
+.seg button{font:600 14px var(--f-body);background:transparent;color:var(--ink);border:0;padding:8px 12px;min-height:40px;cursor:pointer}
+.seg button+button{border-left:2px solid var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.dstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.dstats .stat{display:flex;flex-direction:column;gap:2px}
+.dstats .stat b{font-size:26px}
+.dstats .stat small{color:var(--muted);font-size:12px}
+.chartbox svg{width:100%;height:auto;display:block}
+.chartbox .bar{fill:var(--s-work)}
+.chartbox .hit{fill:transparent}
+.chartbox .hit:hover{fill:var(--line);opacity:.35}
+.chartbox .grid{stroke:var(--line);stroke-width:1}
+.chartbox .base{stroke:var(--muted);stroke-width:1}
+.chartbox .ax{fill:var(--muted);font:20px var(--f-body)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+table.small{min-width:0;font-size:14px}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.comments{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:8px;font-size:14px}
+@media (max-width:640px){.dstats{grid-template-columns:repeat(2,minmax(0,1fr))}.grid2{grid-template-columns:1fr}}
 .waitpay{margin:0;font-weight:600;color:var(--s-ready);background:var(--s-ready-bg);padding:10px 12px;font-size:14px}
 .pay{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:12px}
 .btn.wa{border-color:#1E6B3A;color:var(--s-ready)}
@@ -134,6 +165,7 @@ a.btn{display:inline-flex;align-items:center;text-decoration:none}
     <button role="tab" id="tab-attendant" aria-controls="v-attendant" aria-selected="false">Attendant</button>
     <button role="tab" id="tab-security" aria-controls="v-security" aria-selected="false">Mall security</button>
     <button role="tab" id="tab-staff" aria-controls="v-staff" aria-selected="false" hidden>Staff</button>
+    <button role="tab" id="tab-dash" aria-controls="v-dash" aria-selected="false" hidden>Dashboard</button>
   </nav>
 
   <p class="notice" id="offline" hidden>Can’t reach the database. Check your connection and reload.</p>
@@ -223,7 +255,7 @@ a.btn{display:inline-flex;align-items:center;text-decoration:none}
       <div class="row"><button class="btn alt" id="exBtn" hidden>Add example tickets</button><button class="btn alt" id="dlBtn">Download today's log (CSV)</button></div>
     </div>
     <div class="tablebox"><table>
-      <thead><tr><th>Ticket</th><th>Car</th><th>Bay</th><th>Service</th><th>Status</th><th>Attendant</th><th>Photos</th><th>Booked</th><th>Verified</th><th>Started</th><th>Done</th><th>Paid</th></tr></thead>
+      <thead><tr><th>Ticket</th><th>Car</th><th>Bay</th><th>Service</th><th>Status</th><th>Attendant</th><th>Photos</th><th>Damage</th><th>Rating</th><th>Booked</th><th>Verified</th><th>Started</th><th>Done</th><th>Paid</th></tr></thead>
       <tbody id="logBody"></tbody>
     </table></div>
     <p class="hint">Tap a ticket number to see its photos and alert history. Phone numbers are masked.</p>
@@ -240,6 +272,29 @@ a.btn{display:inline-flex;align-items:center;text-decoration:none}
       <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Change role</th></tr></thead>
       <tbody id="staffBody"></tbody>
     </table></div>
+  </section>
+  <!-- DASHBOARD (owner only) -->
+  <section class="panel" id="v-dash" role="tabpanel" aria-labelledby="tab-dash" hidden>
+    <div class="row" style="justify-content:space-between">
+      <h2>Business dashboard</h2>
+      <div class="seg" role="group" aria-label="Date range">
+        <button type="button" data-range="1" aria-pressed="false">Today</button>
+        <button type="button" data-range="7" aria-pressed="true">7 days</button>
+        <button type="button" data-range="30" aria-pressed="false">30 days</button>
+      </div>
+    </div>
+    <div class="dstats" id="dashStats"></div>
+    <div class="card"><h3>Bookings by hour</h3><div class="chartbox" id="hourChart"></div></div>
+    <div class="grid2">
+      <div class="card"><h3>Attendants</h3><div class="tablebox"><table class="small">
+        <thead><tr><th>Name</th><th class="num">Washes</th><th class="num">Avg time</th><th class="num">Rating</th><th class="num">Damage noted</th></tr></thead>
+        <tbody id="attBody"></tbody></table></div></div>
+      <div class="card"><h3>Services</h3><div class="tablebox"><table class="small">
+        <thead><tr><th>Service</th><th class="num">Washes</th><th class="num">Revenue</th></tr></thead>
+        <tbody id="svcBody"></tbody></table></div></div>
+    </div>
+    <div class="card"><h3>Latest customer comments</h3><ul class="comments" id="comments"></ul></div>
+    <p class="hint">Example tickets are left out. Revenue uses the prices in settings.js.</p>
   </section>
 </div>
 <script type="module" src="app.js"></script>
