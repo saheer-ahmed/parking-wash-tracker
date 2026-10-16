@@ -263,6 +263,9 @@ async function act(id, action, extra) {
   const by = profile?.name || 'Staff';
   if (action === 'cancel') {
     Object.assign(patch, { status: 'cancelled', cancelledAt: now(), alerts: addAlert(tk, 'Booking cancelled') });
+  } else if (action === 'pay') {
+    if (tk.status !== 'ready') return 'Payment opens when your car is ready.';
+    Object.assign(patch, { status: 'closed', paidAt: now(), paidVia: 'Customer (demo)', alerts: addAlert(tk, 'Payment received. Ticket closed. Thank you!') });
   } else {
     if (!can('attendant')) return 'Only attendants can update jobs.';
     if (action === 'verify') {
@@ -345,10 +348,9 @@ function renderCustomer() {
     <p class="err" hidden></p></article>`).join('');
 }
 function payHTML(tk) {
-  const link = upiLink(tk); const amt = price(tk) ? ` ₹${price(tk)}` : '';
-  return link
-    ? `<div class="row"><a class="btn go" href="${esc(link)}">Pay${amt} by UPI</a><span class="hint">Opens Google Pay, PhonePe, Paytm or your bank app.</span></div>`
-    : '<p class="hint">Your car is ready. Please pay the attendant by UPI.</p>';
+  const amt = price(tk) ? ` ₹${price(tk)}` : '';
+  return `<div class="pay"><div class="row"><button class="btn go" data-act="pay">Pay${amt} now</button></div>
+    <p class="hint">Demo payment: tapping marks the ticket as paid. No money is taken.</p></div>`;
 }
 
 function photoBtn(kind, has) {

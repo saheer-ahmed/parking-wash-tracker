@@ -54,6 +54,9 @@ service cloud.firestore {
           // Customer (or anyone holding the id) cancels before work starts.
           (step('booked', 'cancelled') && changed().hasOnly(['status', 'cancelledAt', 'alerts']))
           ||
+          // Customer marks a ready car as paid (demo payment).
+          (step('ready', 'closed') && changed().hasOnly(['status', 'paidAt', 'paidVia', 'alerts']))
+          ||
           (hasRole(['attendant', 'owner']) && locked() && (
                step('booked', 'verified')
             || (step('verified', 'washing') && d().photos.before is string)
