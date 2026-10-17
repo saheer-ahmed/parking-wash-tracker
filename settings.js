@@ -7,31 +7,28 @@ export const business = {
   upiId: "",
   // Name shown in the customer's UPI app.
   payeeName: "Parking Wash",
-  // Price per service in rupees (sample prices for the demo; change before launch).
-  prices: {
-    "Exterior eco wash": 249,
-    "Interior cleaning": 299,
-    "Full wash, inside and out": 499,
-    "Steam interior cleaning": 699,
-    "Tyre pressure check": 50,
-    "Battery check": 100,
-  },
+  // Starting list of services. After the owner saves "Services and prices" on the dashboard,
+  // the dashboard version is used instead and this list is ignored.
+  // kind: "wash" (big tiles) or "addon". checklist: what the attendant ticks before "Wash complete".
+  services: [
+    { name: "Exterior eco wash", kind: "wash", desc: "Outside only · no keys needed", price: 249,
+      checklist: ["Body panels", "Windows and mirrors", "Wheels and tyres", "Door edges and handles"] },
+    { name: "Interior cleaning", kind: "wash", desc: "Vacuum and wipe-down inside", price: 299,
+      checklist: ["Seats vacuumed", "Floor mats", "Dashboard and console", "Inside of windows"] },
+    { name: "Full wash, inside and out", kind: "wash", desc: "Exterior + interior", price: 499,
+      checklist: ["Body panels", "Windows and mirrors", "Wheels and tyres", "Door edges and handles", "Seats vacuumed", "Floor mats", "Dashboard and console", "Inside of windows"] },
+    { name: "Steam interior cleaning", kind: "wash", desc: "Deep clean of seats and mats", price: 699,
+      checklist: ["Seats steamed", "Floor mats steamed", "Dashboard and vents", "Door panels"] },
+    { name: "Tyre pressure check", kind: "addon", price: 50, checklist: ["Tyre pressure checked and set"] },
+    { name: "Battery check", kind: "addon", price: 100, checklist: ["Battery terminals and charge checked"] },
+  ],
+  offer: { active: false, label: "", pct: 0 },
   // Locations. Each has a short id (letters only, used in QR links), a name, the venue's
   // revenue share in percent, and its parking zones (one QR code per zone).
   defaultSite: "forum",
   sites: [
     { id: "forum", name: "Forum Mall, Mangalore", sharePct: 15, zones: ["Level B1", "Level B2", "Ground"] },
   ],
-  // What the attendant ticks off for each service before "Wash complete" unlocks.
-  // The customer sees the ticked list on their ticket.
-  checklists: {
-    "Exterior eco wash": ["Body panels", "Windows and mirrors", "Wheels and tyres", "Door edges and handles"],
-    "Interior cleaning": ["Seats vacuumed", "Floor mats", "Dashboard and console", "Inside of windows"],
-    "Full wash, inside and out": ["Body panels", "Windows and mirrors", "Wheels and tyres", "Door edges and handles", "Seats vacuumed", "Floor mats", "Dashboard and console", "Inside of windows"],
-    "Steam interior cleaning": ["Seats steamed", "Floor mats steamed", "Dashboard and vents", "Door panels"],
-    "Tyre pressure check": ["Tyre pressure checked and set"],
-    "Battery check": ["Battery terminals and charge checked"],
-  },
   // Loyalty: every Nth paid wash for the same car gets this discount.
   loyalty: { every: 5, discountPct: 50 },
 };

@@ -50,6 +50,15 @@ service cloud.firestore {
         return d().issue.keys().hasOnly(['status', 'type', 'text', 'at']) && d().issue.status == 'open'
             && d().issue.text is string && d().issue.text.size() <= 500 && d().issue.type is string && d().issue.type.size() <= 60;
       }
+      // Customer answers the attendant's latest add-on suggestion; nothing else in the list may change.
+      function answered() {
+        let n = o().get('suggests', []).size();
+        return n > 0 && d().suggests.size() == n
+            && d().suggests[0:n - 1] == o().suggests[0:n - 1]
+            && o().suggests[n - 1].status == 'open'
+            && d().suggests[n - 1].diff(o().suggests[n - 1]).affectedKeys().hasOnly(['status', 'answeredAt'])
+            && d().suggests[n - 1].status in ['accepted', 'declined'];
+      }
       function staffHere() {
         return hasRole(['owner']) || (hasRole(['attendant']) && o().get('site', 'forum') == userSite());
       }
@@ -86,6 +95,10 @@ service cloud.firestore {
           (o().status == 'closed' && d().status == 'closed' && !('issue' in o())
             && changed().hasOnly(['issue', 'alerts']) && goodIssue())
           ||
+          // Customer accepts or declines an add-on suggestion before the wash is complete.
+          (o().status in ['verified', 'washing'] && d().status == o().status
+            && changed().hasOnly(['suggests', 'alerts']) && answered())
+          ||
           // Owner resolves a complaint.
           (hasRole(['owner']) && ('issue' in o()) && changed().hasOnly(['issue', 'alerts']))
           ||
@@ -99,7 +112,7 @@ service cloud.firestore {
             || (step('washing', 'ready') && 'after' in d().photos)
             || step('ready', 'closed')
             || ((step('booked', 'noshow') || step('verified', 'noshow')) && d().noshowReason is string && d().noshowReason.size() <= 100)
-            || (d().status == o().status && changed().hasOnly(['photos', 'damage', 'checklist']))
+            || (d().status == o().status && changed().hasOnly(['photos', 'damage', 'checklist', 'suggests', 'alerts']))
           ));
 
       allow delete: if hasRole(['owner']);
@@ -112,6 +125,15 @@ service cloud.firestore {
                     && request.resource.data.keys().hasOnly(['before', 'after', 'damage'])
                     && get(/databases/$(database)/documents/tickets/$(ticketId)).data.get('attendantUid', '') in ['', request.auth.uid];
       allow delete: if hasRole(['owner']);
+    }
+
+    // Services, prices, offer and loyalty settings. Everyone reads them; only the owner changes them.
+    match /config/{id} {
+      allow get: if true;
+      allow list: if false;
+      allow write: if hasRole(['owner']) && id == 'main'
+                    && request.resource.data.keys().hasOnly(['services', 'offer', 'loyalty', 'updatedAt', 'updatedBy'])
+                    && request.resource.data.services is list && request.resource.data.services.size() <= 40;
     }
 
     // Queue figures and the live board for each site. Anyone can read one site's document;

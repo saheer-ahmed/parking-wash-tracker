@@ -123,11 +123,19 @@ Publish the new `firestore.rules` once (Firestore → Rules → paste → Publis
 - **Live board:** Dashboard → Parking QR codes → **Open live board**. A read-only screen for the mall’s security room or parking office: waiting, being washed, ready, and today’s figures. No login; plates are partly hidden. It updates while any staff phone at that site is signed in.
 - **Complaints:** customers tap **Report a problem** on a paid ticket (once). The owner gets an alert, and the Dashboard’s **Complaints** section shows it with the photos, a button to message the customer and **Mark resolved** with a note. The customer sees the resolution on their ticket.
 
+## Version 7: prices on the dashboard, add-on suggestions, saved cars
+
+Publish the new `firestore.rules` once.
+
+- **Services and prices** (Dashboard): change prices, add, reorder or switch off services, edit each service’s attendant checklist, run an offer (for example “Diwali offer, 20% off”) and change loyalty. Saving updates every phone within seconds. Prices are fixed on a ticket when the attendant verifies the car, so old tickets keep their prices. Until the first save, the list in `settings.js` is used.
+- **Add-on suggestions:** during a job the attendant taps **Suggest an add-on**, picks services and writes why (“Front left tyre looks low”). The customer gets a card on their ticket with **Add for ₹50** or **No thanks**. Nothing is added unless the customer taps Add; accepted add-ons join the price, checklist and receipt.
+- **Saved cars and Book again:** the booking page remembers up to three cars (number and WhatsApp) on the customer’s phone and fills them in. Finished tickets have **Book again**, which fills the car and the same services; only the bay is left to type.
+
 ## Before real customers use it
 
 - **Real WhatsApp alerts:** alerts are prepared in the app and opened in WhatsApp; sending them automatically needs the WhatsApp Business API through a provider.
 - **Payments:** the Pay button is a demo. Before launch, add your UPI ID in `settings.js` or connect a payment gateway.
-- **Prices:** the prices in `settings.js` are samples.
+- **Prices:** the starting prices are samples. Set real ones on the dashboard.
 
 ## Free limits
 

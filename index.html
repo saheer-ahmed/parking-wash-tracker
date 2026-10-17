@@ -347,6 +347,20 @@ textarea{resize:vertical;min-height:90px;line-height:1.4}
 .issuecard{display:flex;flex-direction:column;gap:10px;border:1px solid var(--line);border-left:4px solid var(--bad);border-radius:var(--r-sm);padding:14px;background:var(--surface-2)}
 .issuecard.resolved{border-left-color:var(--ready);opacity:.8}
 
+/* Saved cars, offer, add-on suggestions, service editor */
+.mycars{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.carchip{font:800 14px var(--f);letter-spacing:.06em;background:#fff;color:#111;border:2px solid #111;border-radius:6px;padding:6px 10px;cursor:pointer;min-height:40px}
+.carchip.on{outline:3px solid var(--accent);outline-offset:1px}
+.offerinfo{align-self:flex-start;font-weight:800;font-size:14px;background:var(--accent);color:var(--accent-ink);padding:6px 12px;border-radius:999px}
+.sugbox summary{list-style:none;width:fit-content}.sugbox summary::-webkit-details-marker{display:none}
+.sugform{display:flex;flex-direction:column;gap:8px;padding-top:8px}
+.sugform .ck b{margin-left:auto}
+.sugstate{font-size:14px;font-weight:600;padding:10px 12px;border-radius:var(--r-sm)}
+.sugstate.wait{background:var(--wait-bg);color:var(--wait)}.sugstate.yes{background:var(--ready-bg);color:var(--ready)}.sugstate.no{background:var(--done-bg);color:var(--done)}
+.sugcard{display:flex;flex-direction:column;gap:10px;border:2px solid var(--accent);background:var(--accent-soft);border-radius:var(--r);padding:16px}
+.svcedit{display:flex;flex-direction:column;gap:10px;border:1px solid var(--line);border-radius:var(--r-sm);padding:14px;background:var(--surface-2)}
+.svcedit.off{opacity:.6}
+
 /* Live board */
 .boardmode .appbar,.boardmode main>:not(#v-board){display:none!important}
 .boardmode .wrap{max-width:none;padding:24px}
@@ -431,9 +445,11 @@ textarea{resize:vertical;min-height:90px;line-height:1.4}
         <h2 id="bookTitle">Book a wash for your parked car</h2>
         <p class="hint bookintro">Shop while we clean. Nothing is done to your car until you book and agree below.</p>
         <p class="zoneinfo bookintro" id="zoneInfo" hidden></p>
+        <p class="offerinfo bookintro" id="offerInfo" hidden></p>
       </div>
       <button class="btn alt" id="bookAnother" type="button" hidden>Book another car</button>
       <form id="bookForm" novalidate>
+        <div class="mycars" id="myCars" hidden></div>
         <div class="two">
           <label>Car number
             <input id="f-plate" name="plate" autocomplete="off" autocapitalize="characters" placeholder="KA 19 MN 4821" required>
@@ -442,20 +458,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.4}
             <input id="f-bay" name="bay" autocomplete="off" placeholder="47" required>
           </label>
         </div>
-        <fieldset class="svcs" id="f-services">
-          <legend>Choose your wash</legend>
-          <div class="svcgrid">
-            <label class="svc"><input type="checkbox" value="Exterior eco wash" checked><span>Exterior eco wash</span><small>Outside only · no keys needed</small><b data-price></b></label>
-            <label class="svc"><input type="checkbox" value="Interior cleaning"><span>Interior cleaning</span><small>Vacuum and wipe-down inside</small><b data-price></b></label>
-            <label class="svc"><input type="checkbox" value="Full wash, inside and out"><span>Full wash</span><small>Inside and out</small><b data-price></b></label>
-            <label class="svc"><input type="checkbox" value="Steam interior cleaning"><span>Steam interior</span><small>Deep clean of seats and mats</small><b data-price></b></label>
-          </div>
-          <p class="svchead">Add-ons</p>
-          <div class="svcgrid addons">
-            <label class="svc"><input type="checkbox" value="Tyre pressure check"><span>Tyre pressure check</span><b data-price></b></label>
-            <label class="svc"><input type="checkbox" value="Battery check"><span>Battery check</span><b data-price></b></label>
-          </div>
-        </fieldset>
+        <fieldset class="svcs" id="f-services"></fieldset>
         <label>When will you be back at the car?
           <select id="f-back">
             <option value="">Not sure</option><option value="30">In 30 minutes</option><option value="60">In 1 hour</option>
@@ -471,7 +474,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.4}
         </label>
         <p class="err" id="bookErr" hidden></p>
         <div class="paybar">
-          <div><small>Total</small><b id="f-total">₹0</b></div>
+          <div><small id="f-totlabel">Total</small><b id="f-total">₹0</b></div>
           <button class="btn go" type="submit" id="bookBtn">Book wash</button>
         </div>
       </form>
@@ -614,6 +617,11 @@ textarea{resize:vertical;min-height:90px;line-height:1.4}
       <ul class="comments" id="comments"></ul>
     </div></details>
 
+    <details class="sec" id="catCard"><summary>Services and prices <span class="meta" id="catMeta"></span></summary><div class="secbody">
+      <p class="hint">Change prices, add or switch off services, edit the attendant checklist, and run an offer.</p>
+      <div class="panel" id="catEditor"></div>
+    </div></details>
+
     <details class="sec" id="reportCard"><summary>Monthly report for the venue</summary><div class="secbody">
       <p class="hint">A one-page summary for the mall review: washes, revenue and their share, ratings, damage notes, consent and photos.</p>
       <div class="row"><label class="inline"><span class="hint">Month</span><select id="rMonth"></select></label><label class="inline"><span class="hint">Site</span><select id="rSite"></select></label></div>
@@ -655,6 +663,6 @@ textarea{resize:vertical;min-height:90px;line-height:1.4}
 
 <script src="qrcode.js"></script>
 <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
-<script type="module" src="app.js?v=202610161747"></script>
+<script type="module" src="app.js?v=202610171021"></script>
 </body>
 </html>

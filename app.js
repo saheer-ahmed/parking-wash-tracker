@@ -2,8 +2,8 @@
 // Customers book without an account and only ever see their own ticket.
 // Staff sign in; the owner gives each account a role (attendant or mall security) on the Staff tab.
 
-import { firebaseConfig } from './firebase-config.js?v=202610161747';
-import { business } from './settings.js?v=202610161747';
+import { firebaseConfig } from './firebase-config.js?v=202610171021';
+import { business } from './settings.js?v=202610171021';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, getDocs, onSnapshot, query, orderBy, limit, where,
@@ -103,14 +103,41 @@ const waNumber = p => {
 // A ticket's service can hold several items joined with " + ".
 const SEP = ' + ';
 const items = svc => String(svc || '').split(SEP).map(x => x.trim()).filter(Boolean);
+// The service list lives in Firestore (config/main) so the owner can edit it from the dashboard.
+// settings.js is the starting point until the first save.
+let catalog = [];
+function applyCatalog(cfg) {
+  const src = cfg?.services?.length ? cfg.services : (business.services || []);
+  catalog = src.map(x => ({ name: String(x.name || '').trim(), kind: x.kind === 'addon' ? 'addon' : 'wash', desc: String(x.desc || ''),
+    price: Math.max(0, Math.round(Number(x.price) || 0)), checklist: (x.checklist || []).map(String).filter(Boolean), active: x.active !== false })).filter(x => x.name);
+  business.prices = { ...(business.prices || {}), ...Object.fromEntries(catalog.map(x => [x.name, x.price])) };
+  business.checklists = { ...(business.checklists || {}), ...Object.fromEntries(catalog.map(x => [x.name, x.checklist])) };
+  if (cfg?.loyalty) business.loyalty = { every: Number(cfg.loyalty.every) || 0, discountPct: Number(cfg.loyalty.discountPct) || 0 };
+  business.offer = cfg?.offer || business.offer || { active: false, label: '', pct: 0 };
+}
+applyCatalog(null);
+const activeCatalog = () => catalog.filter(x => x.active);
+const offerOn = () => !!(business.offer?.active && Number(business.offer.pct) > 0);
 const itemPrice = name => Number(business.prices?.[name] || 0);
-const gross = tk => items(tk.service).reduce((sum, n) => sum + itemPrice(n), 0);
-const discount = tk => Math.round(gross(tk) * (Number(tk.discountPct || 0) / 100));
+// Prices are fixed on the ticket when the attendant verifies the car, so later price changes don't alter old tickets.
+// Add-ons the customer accepted during the wash carry their own price.
+const lineItems = tk => [
+  ...items(tk.service).map(n => [n, Number(tk.prices?.[n] ?? itemPrice(n))]),
+  ...(tk.suggests || []).filter(x => x.status === 'accepted').flatMap(x => (x.items || []).map(i => [i.n, Number(i.p) || 0])),
+];
+const gross = tk => lineItems(tk).reduce((sum, [, p]) => sum + p, 0);
+// Before the car is verified, show the running offer so the ticket matches what the booking page said.
+const pctOf = tk => Number(tk.discountPct || 0) || (tk.status === 'booked' && offerOn() ? Number(business.offer.pct) : 0);
+const discount = tk => Math.round(gross(tk) * (pctOf(tk) / 100));
+const discountName = tk => tk.discountLabel || 'Loyalty discount';
+const discChip = tk => tk.discountPct ? `<span class="chip st-ready">${esc(tk.discountLabel ? tk.discountLabel.split(' (')[0] : 'Loyalty')} −${tk.discountPct}%</span>` : '';
 const price = tk => gross(tk) - discount(tk);
 const chosen = () => [...document.querySelectorAll('#f-services input:checked')].map(i => i.value);
 function updateTotal() {
   const sum = chosen().reduce((s, n) => s + itemPrice(n), 0);
-  $('#f-total').textContent = '₹' + sum.toLocaleString('en-IN');
+  const off = offerOn() ? Math.round(sum * Number(business.offer.pct) / 100) : 0;
+  $('#f-total').textContent = '₹' + (sum - off).toLocaleString('en-IN');
+  $('#f-totlabel').textContent = off ? `Total · ${business.offer.pct}% off` : 'Total';
 }
 function waMessage(tk) {
   const c = code(tk);
@@ -135,7 +162,7 @@ function upiLink(tk) {
 }
 
 // ---- service checklist, return time, plate masking
-const checklistFor = tk => [...new Set(items(tk.service).flatMap(n => business.checklists?.[n] || []))];
+const checklistFor = tk => [...new Set(lineItems(tk).flatMap(([n]) => business.checklists?.[n] || []))];
 const checklistDone = tk => checklistFor(tk).every(i => tk.checklist?.[i]);
 const isLate = tk => !!(tk.backBy && !DONE.includes(tk.status) && tk.status !== 'ready' && new Date(tk.backBy) < new Date());
 const maskPlate = p => { const g = String(p || '').split(' '); return g.length >= 3 ? `${g[0]} ${g[1]} ·· ${g[g.length - 1]}` : String(p || '').replace(/^(.{2}).*(.{4})$/, '$1 ·· $2'); };
@@ -218,6 +245,7 @@ $('#bookForm').addEventListener('submit', async e => {
     await setDoc(ref, tk);
     mine = [ref.id, ...mine.filter(x => x !== ref.id)].slice(0, 10); store.set('pwt-mine2', mine);
     watchMine();
+    saveCar({ plate: tk.plate, phone, services: tk.service.split(SEP) });
     $('#bookForm').reset();
     bookOpen = false;
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -246,6 +274,35 @@ function renderEta() {
 }
 function watchPublic(site, cb) {
   return onSnapshot(doc(fs, 'public', site), snap => cb(snap.exists() ? snap.data() : null), () => cb(null));
+}
+
+function renderBookServices(pick) {
+  const box = $('#f-services'); if (!box) return;
+  const was = pick || chosen();
+  const tile = x => `<label class="svc"><input type="checkbox" value="${esc(x.name)}" ${was.includes(x.name) ? 'checked' : ''}><span>${esc(x.name)}</span>${x.desc && x.kind === 'wash' ? `<small>${esc(x.desc)}</small>` : ''}<b>${x.price ? '₹' + x.price : ''}</b></label>`;
+  const washes = activeCatalog().filter(x => x.kind === 'wash'), adds = activeCatalog().filter(x => x.kind === 'addon');
+  box.innerHTML = `<legend>Choose your wash</legend><div class="svcgrid">${washes.map(tile).join('')}</div>${adds.length ? `<p class="svchead">Add-ons</p><div class="svcgrid addons">${adds.map(tile).join('')}</div>` : ''}`;
+  if (!box.querySelector('input:checked') && !pick) box.querySelector('input')?.setAttribute('checked', '');
+  const oi = $('#offerInfo');
+  if (oi) { oi.hidden = !offerOn(); oi.textContent = offerOn() ? `${business.offer.label || 'Offer'} · ${business.offer.pct}% off today` : ''; }
+  updateTotal();
+}
+
+// ---- saved cars on this phone, for quick repeat bookings
+const cars = () => store.get('pwt-cars', []);
+function saveCar(c) { store.set('pwt-cars', [c, ...cars().filter(x => norm(x.plate) !== norm(c.plate))].slice(0, 3)); }
+function fillCar(c, keepBay) {
+  if (!c) return;
+  $('#f-plate').value = c.plate || ''; $('#f-phone').value = c.phone || '';
+  if (!keepBay) $('#f-bay').value = '';
+  const want = (c.services || []).filter(n => activeCatalog().some(x => x.name === n));
+  if (want.length) renderBookServices(want);
+}
+function renderCars() {
+  const box = $('#myCars'); if (!box) return;
+  const list = cars();
+  box.hidden = !list.length;
+  box.innerHTML = list.length ? `<span class="hint">Your cars</span>${list.map((c, i) => `<button type="button" class="carchip${norm($('#f-plate').value) === norm(c.plate) ? ' on' : ''}" data-car="${i}">${esc(c.plate)}</button>`).join('')}<button type="button" class="link" data-car="forget">Forget</button>` : '';
 }
 
 function watchMine() {
@@ -394,7 +451,8 @@ function boardData(siteId) {
   };
 }
 let pubTimer = null;
-function publishSoon() { clearTimeout(pubTimer); pubTimer = setTimeout(publishBoards, 1500); }
+// At most one write every 1.5 s, even while tickets keep changing.
+function publishSoon() { if (pubTimer) return; pubTimer = setTimeout(() => { pubTimer = null; publishBoards(); }, 1500); }
 async function publishBoards(force) {
   if (!['owner', 'attendant', 'security'].includes(role())) return;
   const sites = role() === 'owner' ? SITES.map(x => x.id) : [mySite()];
@@ -466,6 +524,13 @@ async function act(id, action, extra) {
     const note = String(extra || '').trim().slice(0, 300);
     if (!note) return 'Write what was done, for example “Refunded ₹249” or “Re-washed the car”.';
     Object.assign(patch, { issue: { ...tk.issue, status: 'resolved', resolution: note, resolvedAt: now(), resolvedBy: profile?.name || 'Owner' }, alerts: addAlert(tk, `Problem resolved: ${note}`) });
+  } else if (action === 'accept' || action === 'decline') {
+    const g = (tk.suggests || []).at(-1);
+    if (!g || g.status !== 'open' || !['verified', 'washing'].includes(tk.status)) return 'This suggestion has already been answered.';
+    const yes = action === 'accept';
+    const sum = (g.items || []).reduce((a, i) => a + (Number(i.p) || 0), 0);
+    Object.assign(patch, { suggests: [...tk.suggests.slice(0, -1), { ...g, status: yes ? 'accepted' : 'declined', answeredAt: now() }],
+      alerts: addAlert(tk, yes ? `You added ${g.items.map(i => i.n).join(', ')} (+₹${sum})` : 'You said no thanks to the suggestion') });
   } else if (action === 'pay') {
     if (tk.status !== 'ready') return 'Payment opens when your car is ready.';
     Object.assign(patch, { status: 'closed', paidAt: now(), paidVia: 'Customer (demo)', alerts: addAlert(tk, 'Payment received. Ticket closed. Thank you!') });
@@ -480,11 +545,27 @@ async function act(id, action, extra) {
     if (action === 'verify') {
       if (norm(extra) !== tk.plateKey) return 'Car number doesn’t match the booking. Don’t start; check the bay with the customer.';
       Object.assign(patch, { status: 'verified', verifiedAt: now(), attendant: by, attendantUid: user.uid, alerts: addAlert(tk, `Car verified by ${by}`) });
+      patch.prices = Object.fromEntries(items(tk.service).map(n => [n, itemPrice(n)]));
       const v = visits.get(tk.id); const L = business.loyalty || {};
-      if (v != null && L.every > 1 && (v + 1) % L.every === 0 && !tk.discountPct) {
-        patch.discountPct = Number(L.discountPct) || 0;
-        patch.alerts = addAlert({ alerts: patch.alerts }, `Loyalty wash: ${patch.discountPct}% off. Thank you for coming back!`);
+      let best = null;
+      if (v != null && L.every > 1 && (v + 1) % L.every === 0 && Number(L.discountPct) > 0) best = { pct: Number(L.discountPct), label: `Loyalty wash (${L.discountPct}% off)`, msg: `Loyalty wash: ${L.discountPct}% off. Thank you for coming back!` };
+      if (offerOn() && Number(business.offer.pct) > (best?.pct || 0)) best = { pct: Number(business.offer.pct), label: `${business.offer.label || 'Offer'} (${business.offer.pct}% off)`, msg: `${business.offer.label || 'Offer'}: ${business.offer.pct}% off applied.` };
+      if (best && !tk.discountPct) {
+        Object.assign(patch, { discountPct: best.pct, discountLabel: best.label });
+        patch.alerts = addAlert({ alerts: patch.alerts }, best.msg);
       }
+    }
+    if (action === 'suggest') {
+      if (!['verified', 'washing'].includes(tk.status)) return 'Suggestions can be sent before the wash is complete.';
+      if ((tk.suggests || []).some(g => g.status === 'open')) return 'Wait for the customer to answer the last suggestion.';
+      const have = lineItems(tk).map(([n]) => n);
+      const names = (extra?.names || []).filter(n => !have.includes(n) && activeCatalog().some(x => x.name === n));
+      if (!names.length) return 'Choose at least one service to suggest.';
+      const its = names.map(n => ({ n, p: itemPrice(n) }));
+      const sum = its.reduce((a, i) => a + i.p, 0);
+      const note = String(extra?.note || '').trim().slice(0, 160);
+      Object.assign(patch, { suggests: [...(tk.suggests || []), { items: its, note, at: now(), by, status: 'open' }].slice(-5),
+        alerts: addAlert(tk, `${by} suggests ${names.join(', ')} (+₹${sum})${note ? ': ' + note : ''}. Tap Add on your ticket if you’d like it`) });
     }
     if (action === 'check') {
       if (tk.status !== 'washing') return '';
@@ -603,7 +684,7 @@ function headHTML(tk, showPhone) {
   const st = LABEL[tk.status] ? tk.status : 'booked';
   const multi = SITES.length > 1 && role() === 'owner';
   return `<div class="tk-head"><div class="row"><span class="plate">${esc(tk.plate)}</span>
-    <span class="chip st-${st}">${LABEL[st]}</span>${tk.example ? '<span class="ex">Example</span>' : ''}${tk.walkUp ? '<span class="ex">Walk-up</span>' : ''}${tk.discountPct ? `<span class="chip st-ready">Loyalty −${tk.discountPct}%</span>` : ''}</div>
+    <span class="chip st-${st}">${LABEL[st]}</span>${tk.example ? '<span class="ex">Example</span>' : ''}${tk.walkUp ? '<span class="ex">Walk-up</span>' : ''}${discChip(tk)}</div>
     <span class="mono">${esc(code(tk))}</span></div>
     <div class="tk-meta">${multi ? `<span>${esc(siteName(tk.site))}</span>` : ''}<span>Bay <b>${esc(bayText(tk))}</b></span><span>${esc(tk.service)}${price(tk) ? ` · <b>₹${price(tk)}</b>` : ''}</span>
     ${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}
@@ -657,6 +738,14 @@ function renderCustomer() {
   $('#bookTitle').textContent = active ? 'Need another car washed?' : 'Book a wash for your parked car';
   box.innerHTML = shown.map(ticketHTML).join('') + (earlier.length
     ? `<details class="sec"><summary>Earlier washes <span class="meta">${earlier.length}</span></summary><div class="secbody">${earlier.map(ticketHTML).join('')}</div></details>` : '');
+  shown.forEach(tk => {
+    const n = (tk.suggests || []).length, k = 'sg:' + tk.id;
+    if (lastSeen.customer.has(k) && n > lastSeen.customer.get(k) && tk.suggests.at(-1).status === 'open') {
+      try { navigator.vibrate?.([200, 100, 200]); } catch {}
+      toast('Your attendant has a suggestion', false, false, 'ok');
+    }
+    lastSeen.customer.set(k, n);
+  });
   flash(box, shown, lastSeen.customer, tk => { if (tk.status === 'ready') { try { navigator.vibrate?.([200, 100, 200]); } catch {} } });
 }
 function ticketHTML(tk) {
@@ -668,8 +757,9 @@ function ticketHTML(tk) {
   return `<article class="card ticket" data-id="${esc(tk.id)}">
     <div class="hero ${st}"><span class="ico">${ICON[ic]}</span><div><h2>${title}</h2><p>${esc(subText)}</p></div></div>
     <div class="tbody">
-      <div class="tline"><span class="plate">${esc(tk.plate)}</span><span class="code">Ticket ${esc(code(tk))}</span>${tk.discountPct ? `<span class="chip st-ready">Loyalty −${tk.discountPct}%</span>` : ''}</div>
-      <div class="tk-meta"><span>Bay <b>${esc(bayText(tk))}</b></span><span>${esc(tk.service)}</span>${price(tk) ? `<span>Total <b>₹${price(tk)}</b></span>` : ''}${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}</div>
+      <div class="tline"><span class="plate">${esc(tk.plate)}</span><span class="code">Ticket ${esc(code(tk))}</span>${discChip(tk)}</div>
+      <div class="tk-meta"><span>Bay <b>${esc(bayText(tk))}</b></span><span>${esc(lineItems(tk).map(([n]) => n).join(' + '))}</span>${price(tk) ? `<span>Total <b>₹${price(tk)}</b></span>` : ''}${tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''}</div>
+      ${suggestCustomerHTML(tk)}
       ${['cancelled', 'noshow'].includes(st) ? '' : stepsHTML(tk)}
       ${tk.backBy && !DONE.includes(st) ? `<p class="hint">You said you’ll be back around <b>${t(tk.backBy)}</b>.</p>` : ''}
       ${damageHTML(tk, true)}${checklistView(tk)}${photosHTML(tk)}
@@ -677,6 +767,7 @@ function ticketHTML(tk) {
       ${st === 'closed' ? (tk.rating ? `<div class="pay"><h3>Thanks for your rating</h3>${ratingHTML(tk)}</div>` : rateHTML()) : ''}
       ${st === 'closed' ? receiptBlock(tk, 'customer') : ''}
       ${st === 'closed' ? issueCustomerHTML(tk) : ''}
+      ${DONE.includes(st) ? `<button class="btn alt" data-again="${esc(tk.id)}">Book again for ${esc(tk.plate)}</button>` : ''}
       ${st === 'booked' ? '<div><button class="link danger" data-act="cancel">Cancel booking</button></div>' : ''}
       <details class="upd"><summary>All updates (${al.length})</summary><ul class="alerts">${al.map(a => `<li><time>${t(a.at)}</time><span>${esc(a.text)}</span></li>`).join('')}</ul></details>
       <p class="err" hidden></p>
@@ -715,7 +806,7 @@ function rateHTML() {
 }
 // ---- receipts
 function receiptLines(tk) {
-  return items(tk.service).map(n => [n, itemPrice(n)]);
+  return lineItems(tk);
 }
 function receiptText(tk) {
   const L = [
@@ -725,7 +816,7 @@ function receiptText(tk) {
     `Car ${tk.plate}`,
     ...receiptLines(tk).map(([n, p]) => `${n}: ₹${p}`),
   ];
-  if (discount(tk)) L.push(`Loyalty discount (${tk.discountPct}%): −₹${discount(tk)}`);
+  if (discount(tk)) L.push(`${discountName(tk)}: −₹${discount(tk)}`);
   L.push(`Total paid: ₹${price(tk)}${tk.paidVia ? ' (' + tk.paidVia + ')' : ''}`);
   if (tk.attendant) L.push(`Attendant: ${tk.attendant}`);
   L.push('Thank you!');
@@ -736,7 +827,7 @@ function receiptHTML(tk) {
     <p class="rc-brand">${esc(brand)}</p>
     <p class="hint">Ticket ${esc(code(tk))} · ${new Date(tk.paidAt || tk.bookedAt).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}<br>${esc(siteName(tk.site))} · Bay ${esc(bayText(tk))} · ${esc(tk.plate)}</p>
     <table class="rc">${receiptLines(tk).map(([n, p]) => `<tr><td>${esc(n)}</td><td class="num">₹${p}</td></tr>`).join('')}
-    ${discount(tk) ? `<tr><td>Loyalty discount (${tk.discountPct}%)</td><td class="num">−₹${discount(tk)}</td></tr>` : ''}
+    ${discount(tk) ? `<tr><td>${esc(discountName(tk))}</td><td class="num">−₹${discount(tk)}</td></tr>` : ''}
     <tr class="rc-total"><td>Total paid</td><td class="num">₹${price(tk)}</td></tr></table>
     <p class="hint">${tk.paidVia ? 'Paid via ' + esc(tk.paidVia) + ' · ' : ''}${tk.attendant ? 'Attendant ' + esc(tk.attendant) : ''}</p></div>`;
 }
@@ -798,6 +889,32 @@ function stage(tk) {
   if (tk.status === 'ready') return [0, 'Waiting for payment'];
   return [0, ''];
 }
+function suggestStaffHTML(tk) {
+  if (!['verified', 'washing'].includes(tk.status)) return '';
+  const last = (tk.suggests || []).at(-1);
+  const sum = g => (g.items || []).reduce((a, i) => a + (Number(i.p) || 0), 0);
+  const names = g => (g.items || []).map(i => i.n).join(', ');
+  const status = last ? (last.status === 'open' ? `<p class="sugstate wait">Waiting for the customer: ${esc(names(last))} +₹${sum(last)}</p>`
+    : last.status === 'accepted' ? `<p class="sugstate yes">Customer added ${esc(names(last))} +₹${sum(last)}</p>` : `<p class="sugstate no">Customer said no to ${esc(names(last))}</p>`) : '';
+  if (last?.status === 'open') return status;
+  const have = lineItems(tk).map(([n]) => n);
+  const opts = activeCatalog().filter(x => !have.includes(x.name));
+  if (!opts.length) return status;
+  return `${status}<details class="sugbox" data-keepopen="${esc(tk.id)}:sg"><summary class="link">Suggest an add-on to the customer</summary><div class="sugform">
+    ${opts.map(x => `<label class="ck"><input type="checkbox" data-sug data-keep="${esc(tk.id)}:s:${esc(x.name)}" value="${esc(x.name)}"><span>${esc(x.name)}</span><b>₹${x.price}</b></label>`).join('')}
+    <label>Why? (shown to the customer)<input class="sugnote" data-keep="${esc(tk.id)}:sn" maxlength="160" placeholder="Front left tyre looks low"></label>
+    <button class="btn alt" data-act="suggest">Send suggestion</button>
+    <p class="hint">The customer gets it on their ticket. Nothing is added unless they tap Add.</p></div></details>`;
+}
+function suggestCustomerHTML(tk) {
+  const g = (tk.suggests || []).at(-1);
+  if (!g || g.status !== 'open' || !['verified', 'washing'].includes(tk.status)) return '';
+  const sum = (g.items || []).reduce((a, i) => a + (Number(i.p) || 0), 0);
+  return `<div class="sugcard"><p class="stepno">Suggestion from ${esc(g.by || 'your attendant')}</p>
+    ${(g.items || []).map(i => `<div class="row between"><b>${esc(i.n)}</b><b>+₹${i.p}</b></div>`).join('')}
+    ${g.note ? `<p>“${esc(g.note)}”</p>` : ''}
+    <button class="btn go big" data-act="accept">Add for ₹${sum}</button><button class="link" data-act="decline">No thanks</button></div>`;
+}
 function nowHTML(tk) {
   const p = tk.photos || {}; const id = esc(tk.id);
   const [n, title] = stage(tk);
@@ -849,11 +966,11 @@ function jobHTML(tk, group) {
       <span class="chip st-${st}">${LABEL[st]}</span><span class="age">${age}</span></button>`;
   if (!open) return `<article class="job s-${st}${group === 'other' ? ' other' : ''}" data-id="${esc(tk.id)}">${head}</article>`;
   const wa = waLink(tk);
-  const meta = [`<span>${esc(code(tk))}</span>`, tk.walkUp ? '<span class="ex">Walk-up</span>' : '', tk.discountPct ? `<span class="chip st-ready">Loyalty −${tk.discountPct}%</span>` : '',
+  const meta = [`<span>${esc(code(tk))}</span>`, tk.walkUp ? '<span class="ex">Walk-up</span>' : '', discChip(tk),
     tk.phone ? `<span>WhatsApp <b>${esc(mask(tk.phone))}</b></span>` : '', tk.attendant ? `<span>Attendant <b>${esc(tk.attendant)}</b></span>` : ''].join('');
   const action = locked
     ? `<div class="nowbox"><p class="lockmsg"><b>${esc(tk.attendant || 'Another attendant')}</b> is on this job. Only they can update it.</p><button class="link" data-act="takeover">Take over this job</button></div>`
-    : nowHTML(tk);
+    : nowHTML(tk) + suggestStaffHTML(tk);
   const foot = [wa ? `<a class="btn wa sm" href="${esc(wa)}" target="_blank" rel="noopener">Send WhatsApp update</a>` : '',
     !locked && ['booked', 'verified'].includes(tk.status) ? noshowHTML(tk.id) : ''].join('');
   return `<article class="job open s-${st}${group === 'other' ? ' other' : ''}" data-id="${esc(tk.id)}">${head}
@@ -863,13 +980,13 @@ function jobHTML(tk, group) {
 // Typed text and open drop-downs survive the live redraws.
 function saveDrafts(box) {
   const d = {}, o = {};
-  box.querySelectorAll('[data-keep]').forEach(i => { d[i.dataset.keep] = i.value; });
+  box.querySelectorAll('[data-keep]').forEach(i => { d[i.dataset.keep] = i.type === 'checkbox' ? i.checked : i.value; });
   box.querySelectorAll('[data-keepopen]').forEach(i => { o[i.dataset.keepopen] = i.open; });
   const a = document.activeElement; const f = box.contains(a) ? a?.dataset?.keep : null;
   return { d, o, f, sel: f && a.setSelectionRange ? [a.selectionStart, a.selectionEnd] : null };
 }
 function restoreDrafts(box, k) {
-  box.querySelectorAll('[data-keep]').forEach(i => { if (k.d[i.dataset.keep] != null) i.value = k.d[i.dataset.keep]; });
+  box.querySelectorAll('[data-keep]').forEach(i => { const v = k.d[i.dataset.keep]; if (v == null) return; if (i.type === 'checkbox') i.checked = v; else i.value = v; });
   box.querySelectorAll('[data-keepopen]').forEach(i => { if (k.o[i.dataset.keepopen]) i.open = true; });
   if (k.f) {
     const el = box.querySelector(`[data-keep="${CSS.escape(k.f)}"]`);
@@ -981,9 +1098,10 @@ async function shiftAction(kind) {
 function walkServices() {
   const box = $('#w-services'); if (!box || box.dataset.done) return;
   box.dataset.done = '1';
-  box.innerHTML = `<legend>Services</legend><div class="svcgrid addons">${Object.keys(business.prices || {}).map(n =>
+  box.innerHTML = `<legend>Services</legend><div class="svcgrid addons">${activeCatalog().map(x => x.name).map(n =>
     `<label class="svc"><input type="checkbox" value="${esc(n)}"><span>${esc(n)}</span><b>${itemPrice(n) ? '₹' + itemPrice(n) : ''}</b></label>`).join('')}</div>
     <p class="total">Total <b id="w-total">₹0</b></p>`;
+  if (box.dataset.bound) return; box.dataset.bound = '1';
   box.addEventListener('change', () => {
     const sum = [...box.querySelectorAll('input:checked')].reduce((s, i) => s + itemPrice(i.value), 0);
     $('#w-total').textContent = '₹' + sum.toLocaleString('en-IN');
@@ -1052,7 +1170,8 @@ function renderDash() {
     ['Damage found', String(list.filter(x => x.damage?.found).length), 'Before washing'],
     ['Cancelled', String(list.filter(x => x.status === 'cancelled').length), 'By the customer'],
     ['Not done', String(list.filter(x => x.status === 'noshow').length), 'Car not found or left'],
-    ['Loyalty washes', String(list.filter(x => x.discountPct).length), 'Discount applied'],
+    ['Discounted washes', String(list.filter(x => x.discountPct).length), 'Loyalty or offer'],
+    ['Add-ons accepted', String(list.filter(x => (x.suggests || []).some(g => g.status === 'accepted')).length), `of ${list.filter(x => (x.suggests || []).length).length} suggested`],
   ].map(tile).join('');
   $('#revMeta').textContent = priced ? inr(revenue) : '';
   $('#bookMeta').textContent = `${list.length} booking${list.length === 1 ? '' : 's'}`;
@@ -1097,9 +1216,10 @@ function renderDash() {
 
   // Services
   const bySvc = new Map();
-  closed.forEach(x => items(x.service).forEach(n => bySvc.set(n, (bySvc.get(n) || 0) + 1)));
+  const svcRev = new Map();
+  closed.forEach(x => lineItems(x).forEach(([n, p]) => { bySvc.set(n, (bySvc.get(n) || 0) + 1); svcRev.set(n, (svcRev.get(n) || 0) + p); }));
   $('#svcBody').innerHTML = bySvc.size ? [...bySvc].sort((a, b) => b[1] - a[1]).map(([sv, c]) =>
-    `<tr><td>${esc(sv)}</td><td class="num">${c}</td><td class="num">${priced ? inr(c * itemPrice(sv)) : '–'}</td></tr>`).join('')
+    `<tr><td>${esc(sv)}</td><td class="num">${c}</td><td class="num">${priced ? inr(svcRev.get(sv) || 0) : '–'}</td></tr>`).join('')
     : '<tr><td colspan="3" class="hint">No completed washes yet.</td></tr>';
 
   // Comments
@@ -1108,6 +1228,7 @@ function renderDash() {
     : '<li class="hint">Customer comments appear here after they rate a wash.</li>';
 
   renderRevenue(inSite); renderTeam(); renderQR(); renderIssues(inSite);
+  if (!catDirty && !$('#catEditor')?.contains(document.activeElement)) renderCatalogEditor();
 }
 
 // ---- dashboard extras: revenue trend, team status, QR codes, monthly report
@@ -1148,6 +1269,7 @@ function renderRevenue(inSite) {
 }
 function renderIssues(inSite) {
   const box = $('#issues'); if (!box) return;
+  const keep = saveDrafts(box);
   const all = tickets.filter(x => x.issue && inSite(x)).sort((a, b) => (b.issue.at || '').localeCompare(a.issue.at || ''));
   const open = all.filter(x => x.issue.status === 'open');
   $('#issueMeta').textContent = open.length ? `${open.length} open` : all.length ? 'All resolved' : '';
@@ -1163,6 +1285,70 @@ function renderIssues(inSite) {
         : `<p class="ok">Resolved by ${esc(tk.issue.resolvedBy || '')}: ${esc(tk.issue.resolution || '')}</p>`}
       <p class="err" hidden></p></div>`).join('')
     : '<p class="hint">No complaints. When a customer reports a problem on their ticket it appears here with the photos.</p>';
+  restoreDrafts(box, keep);
+}
+let cfgDoc = null, catDraft = [], catDirty = false, offDraft = {}, loyDraft = {};
+function loadDraft() {
+  catDraft = catalog.map(x => ({ ...x, checklist: [...x.checklist] }));
+  offDraft = { active: !!business.offer?.active, label: business.offer?.label || '', pct: Number(business.offer?.pct) || 0 };
+  loyDraft = { every: Number(business.loyalty?.every) || 0, discountPct: Number(business.loyalty?.discountPct) || 0 };
+}
+function renderCatalogEditor() {
+  const box = $('#catEditor'); if (!box || role() !== 'owner') return;
+  if (!catDraft.length && !catDirty) loadDraft();
+  $('#catMeta').textContent = `${activeCatalog().length} offered${offerOn() ? ' · offer on' : ''}`;
+  box.innerHTML = catDraft.map((x, i) => `<div class="svcedit${x.active ? '' : ' off'}" data-ci="${i}">
+      <label>Service name<input data-f="name" value="${esc(x.name)}" maxlength="60"></label>
+      <div class="two"><label>Price (₹)<input data-f="price" type="number" inputmode="numeric" min="0" step="1" value="${x.price}"></label>
+        <label>Type<select data-f="kind"><option value="wash" ${x.kind === 'wash' ? 'selected' : ''}>Wash</option><option value="addon" ${x.kind === 'addon' ? 'selected' : ''}>Add-on</option></select></label></div>
+      <label class="check"><input type="checkbox" data-f="active" ${x.active ? 'checked' : ''}><span>Offered to customers</span></label>
+      <label>Short description<input data-f="desc" value="${esc(x.desc)}" maxlength="80" placeholder="Outside only · no keys needed"></label>
+      <label>Checklist for the attendant (one item per line)<textarea data-f="checklist" rows="3">${esc(x.checklist.join('\n'))}</textarea></label>
+      <div class="row between">${i ? `<button class="link" data-catmove="${i}">Move up</button>` : '<span></span>'}<button class="link danger" data-catdel="${i}">Remove</button></div></div>`).join('')
+    + `<button class="btn alt" id="catAdd" type="button">+ Add a service</button>
+    <div class="svcedit"><h3>Offer</h3>
+      <label class="check"><input type="checkbox" data-o="active" ${offDraft.active ? 'checked' : ''}><span>Offer is on</span></label>
+      <div class="two"><label>Name<input data-o="label" value="${esc(offDraft.label)}" maxlength="40" placeholder="Diwali offer"></label><label>Discount (%)<input data-o="pct" type="number" min="0" max="90" value="${offDraft.pct}"></label></div>
+      <p class="hint">Shown on the booking page and applied when the attendant verifies the car. A loyalty discount is used instead if it is bigger.</p></div>
+    <div class="svcedit"><h3>Loyalty</h3>
+      <div class="two"><label>Every Nth wash<input data-l="every" type="number" min="0" max="50" value="${loyDraft.every}"></label><label>Discount (%)<input data-l="discountPct" type="number" min="0" max="100" value="${loyDraft.discountPct}"></label></div>
+      <p class="hint">Set “every” to 0 to switch loyalty off.</p></div>
+    <p class="err" id="catErr" hidden></p>
+    <div class="row"><button class="btn go" id="catSave" type="button">Save changes</button><button class="link" id="catUndo" type="button">Undo changes</button><span class="hint" id="catState">${catDirty ? 'Unsaved changes' : cfgDoc?.updatedAt ? `Last saved ${new Date(cfgDoc.updatedAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${cfgDoc.updatedBy ? ' by ' + esc(cfgDoc.updatedBy) : ''}` : 'Using the starting prices from settings.js'}</span></div>
+    <p class="hint">Changes reach every phone within seconds. Tickets already verified keep their old prices.</p>`;
+}
+function onCatInput(e) {
+  const el = e.target;
+  if (el.dataset.o) { offDraft[el.dataset.o] = el.type === 'checkbox' ? el.checked : el.dataset.o === 'pct' ? Number(el.value) : el.value; }
+  else if (el.dataset.l) { loyDraft[el.dataset.l] = Number(el.value); }
+  else if (el.dataset.f) {
+    const x = catDraft[Number(el.closest('[data-ci]').dataset.ci)]; const f = el.dataset.f;
+    x[f] = f === 'active' ? el.checked : f === 'price' ? Number(el.value) : f === 'checklist' ? el.value.split('\n').map(v => v.trim()).filter(Boolean) : el.value;
+    if (f === 'active') el.closest('.svcedit').classList.toggle('off', !el.checked);
+  } else return;
+  catDirty = true; const st = $('#catState'); if (st) st.textContent = 'Unsaved changes';
+}
+async function saveCatalog() {
+  const err = $('#catErr'); err.hidden = true;
+  const list = catDraft.map(x => ({ name: String(x.name || '').trim(), kind: x.kind === 'addon' ? 'addon' : 'wash', desc: String(x.desc || '').trim().slice(0, 80),
+    price: Math.round(Number(x.price)), checklist: (x.checklist || []).slice(0, 12).map(v => String(v).slice(0, 60)), active: !!x.active }));
+  const problems = [];
+  if (list.some(x => !x.name)) problems.push('Every service needs a name.');
+  if (new Set(list.map(x => x.name.toLowerCase())).size !== list.length) problems.push('Two services have the same name.');
+  if (list.some(x => !(x.price >= 0) || x.price > 100000)) problems.push('Prices must be whole rupees.');
+  if (!list.some(x => x.active && x.kind === 'wash')) problems.push('Offer at least one wash.');
+  if (list.some(x => x.name.includes(SEP.trim()))) problems.push('Service names can’t contain “+”.');
+  const pct = Math.round(Number(offDraft.pct) || 0);
+  if (offDraft.active && !(pct > 0 && pct <= 90)) problems.push('Set the offer discount between 1 and 90%.');
+  if (problems.length) { err.textContent = problems.join(' '); err.hidden = false; return; }
+  $('#catSave').disabled = true;
+  try {
+    await setDoc(doc(fs, 'config', 'main'), { services: list, offer: { active: !!offDraft.active, label: String(offDraft.label || '').trim().slice(0, 40), pct },
+      loyalty: { every: Math.max(0, Math.round(loyDraft.every || 0)), discountPct: Math.min(100, Math.max(0, Math.round(loyDraft.discountPct || 0))) },
+      updatedAt: now(), updatedBy: profile?.name || 'Owner' });
+    catDirty = false; toast('Prices and services saved', false, false, 'ok');
+  } catch { err.textContent = 'Didn’t save. Check your connection and that the new database rules are published.'; err.hidden = false; }
+  const b = $('#catSave'); if (b) b.disabled = false;
 }
 function renderTeam() {
   const box = $('#teamBody'); if (!box) return;
@@ -1225,7 +1411,7 @@ function buildReport() {
   const ar = avg(rated.map(x => x.rating));
   const hours = Array(24).fill(0); list.forEach(x => hours[new Date(x.bookedAt).getHours()]++);
   const peak = hours.indexOf(Math.max(...hours));
-  const svc = new Map(); closed.forEach(x => items(x.service).forEach(n => svc.set(n, (svc.get(n) || 0) + 1)));
+  const svc = new Map(); closed.forEach(x => lineItems(x).forEach(([n]) => svc.set(n, (svc.get(n) || 0) + 1)));
   const daysIn = new Date(y, m, 0).getDate(), daily = [];
   for (let d = 1; d <= daysIn; d++) {
     const k = `${y}-${pad(m)}-${pad(d)}`;
@@ -1290,7 +1476,27 @@ document.addEventListener('click', async e => {
   if (e.target.closest('[data-sound]')) { soundOn = !soundOn; store.set('pwt-sound', soundOn); renderShift(); if (soundOn) chime(); return; }
   if (e.target.closest('#walkFab')) { walkServices(); $('#walkErr').hidden = true; $('#walkDlg').showModal(); return; }
   if (e.target.closest('#walkClose')) { $('#walkDlg').close(); return; }
-  if (e.target.closest('#bookAnother')) { bookOpen = true; renderCustomer(); $('#f-plate').focus(); return; }
+  if (e.target.closest('#bookAnother')) { bookOpen = true; renderCustomer(); if (!$('#f-plate').value) fillCar(cars()[0]); renderCars(); $('#f-bay').focus(); return; }
+  const ag = e.target.closest('[data-again]');
+  if (ag) {
+    const tk = findTicket(ag.dataset.again); if (!tk) return;
+    bookOpen = true; renderCustomer();
+    fillCar({ plate: tk.plate, phone: tk.phone, services: lineItems(tk).map(([n]) => n) });
+    renderCars(); $('#bookCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => $('#f-bay').focus(), 350); toast('Enter today’s parking bay', false, false, 'ok'); return;
+  }
+  const cc = e.target.closest('[data-car]');
+  if (cc) {
+    if (cc.dataset.car === 'forget') { store.set('pwt-cars', []); $('#bookForm').reset(); renderCars(); return; }
+    fillCar(cars()[Number(cc.dataset.car)], true); renderCars(); return;
+  }
+  if (e.target.closest('#catAdd')) { catDraft.push({ name: '', kind: 'addon', desc: '', price: 0, checklist: [], active: true }); renderCatalogEditor(); return; }
+  const cd = e.target.closest('[data-catdel]');
+  if (cd) { catDraft.splice(Number(cd.dataset.catdel), 1); catDirty = true; renderCatalogEditor(); return; }
+  const cm = e.target.closest('[data-catmove]');
+  if (cm) { const i = Number(cm.dataset.catmove); if (i > 0) { [catDraft[i - 1], catDraft[i]] = [catDraft[i], catDraft[i - 1]]; catDirty = true; renderCatalogEditor(); } return; }
+  if (e.target.closest('#catSave')) { saveCatalog(); return; }
+  if (e.target.closest('#catUndo')) { catDirty = false; loadDraft(); renderCatalogEditor(); return; }
   const det = e.target.closest('[data-detail]');
   if (det) { detailId = det.dataset.detail || null; renderSecurity(); if (detailId) $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
   const rb = e.target.closest('[data-role]');
@@ -1338,13 +1544,14 @@ document.addEventListener('click', async e => {
     : a === 'damage' ? card.querySelector('.dmgnote').value
     : a === 'rate' ? { rating: card.dataset.rating, comment: card.querySelector('.rcomment')?.value }
     : a === 'issue' ? { type: card.querySelector('.itype')?.value, text: card.querySelector('.itext')?.value }
-    : a === 'resolve' ? card.querySelector('.resnote')?.value : undefined;
+    : a === 'resolve' ? card.querySelector('.resnote')?.value
+    : a === 'suggest' ? { names: [...card.querySelectorAll('[data-sug]:checked')].map(i => i.value), note: card.querySelector('.sugnote')?.value } : undefined;
   const msg = await act(id, b.dataset.act, extra);
   b.disabled = false;
   if (msg && errEl) { errEl.textContent = msg; errEl.hidden = false; errEl.scrollIntoView({ block: 'nearest' }); }
   else if (!msg) {
     if (a === 'damage' || a === 'nodamage') dmgOpen.delete(id);
-    const said = { issue: 'Sent. We’ll contact you on WhatsApp', resolve: 'Complaint resolved', verify: 'Car verified', nodamage: 'No damage recorded', damage: 'Damage recorded', start: 'Wash started', done: 'Wash complete. Customer notified', paid: 'Cash payment recorded', noshow: 'Closed as not done', takeover: 'Job is yours now', pay: 'Payment done. Thank you!', rate: 'Thanks for your rating' }[a];
+    const said = { suggest: 'Suggestion sent to the customer', accept: 'Added to your wash', decline: 'No problem', issue: 'Sent. We’ll contact you on WhatsApp', resolve: 'Complaint resolved', verify: 'Car verified', nodamage: 'No damage recorded', damage: 'Damage recorded', start: 'Wash started', done: 'Wash complete. Customer notified', paid: 'Cash payment recorded', noshow: 'Closed as not done', takeover: 'Job is yours now', pay: 'Payment done. Thank you!', rate: 'Thanks for your rating' }[a];
     if (said) toast(said, false, false, 'ok');
   }
 });
@@ -1353,6 +1560,7 @@ document.addEventListener('change', async e => {
   if (ss) { try { await updateDoc(doc(fs, 'roles', ss.dataset.siteUid), { site: ss.value, changedAt: now() }); } catch {} return; }
   if (e.target.id === 'dashSite') { dashSite = e.target.value; renderDash(); return; }
   if (e.target.id === 'f-back') { renderEta(); return; }
+  if (e.target.closest('#catEditor')) { onCatInput(e); return; }
   const ck = e.target.closest('[data-check]');
   if (ck) {
     const card = ck.closest('[data-id]');
@@ -1456,14 +1664,21 @@ $('#installBtn').addEventListener('click', async () => {
 window.addEventListener('appinstalled', () => { $('#installBtn').hidden = true; });
 
 // ---- start
-// Show each service's price and keep the total up to date.
-document.querySelectorAll('#f-services .svc').forEach(l => {
-  const pr = itemPrice(l.querySelector('input').value);
-  l.querySelector('[data-price]').textContent = pr ? '₹' + pr : '';
-});
+// Services come from config/main (owner edits on the dashboard), falling back to settings.js.
+renderBookServices();
+fillCar(cars()[0], true); renderCars();
 $('#f-services').addEventListener('change', updateTotal);
-$('#bookForm').addEventListener('reset', () => setTimeout(updateTotal, 0));
-updateTotal();
+$('#bookForm').addEventListener('reset', () => setTimeout(() => { renderBookServices(); renderCars(); }, 0));
+$('#f-plate').addEventListener('input', renderCars);
+document.addEventListener('input', e => { if (e.target.closest('#catEditor')) onCatInput(e); });
+onSnapshot(doc(fs, 'config', 'main'), snap => {
+  cfgDoc = snap.exists() ? snap.data() : null;
+  applyCatalog(cfgDoc);
+  renderBookServices();
+  const ws = $('#w-services'); if (ws) delete ws.dataset.done;
+  if (!catDirty) { catDraft = []; }
+  renderCustomer(); renderStaffViews();
+}, () => {});
 (function initDashControls() {
   const ds = $('#dashSite');
   if (ds) { ds.innerHTML = `<option value="all">All sites</option>${SITES.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}`; ds.closest('label').hidden = SITES.length < 2; }
